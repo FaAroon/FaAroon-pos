@@ -365,6 +365,17 @@ async function lookupOwnAccount() {
   if (!u) return { ok: false, detail: "no user" };
   return { ok: true, account: { uid: u.localId, email: normalizeEmail(u.email), emailVerified: u.emailVerified === true, displayName: u.displayName || "" } };
 }
+async function accountHasPassword() {
+  try {
+    const r = await authedIdentityPost("lookup", {});
+    if (!r.ok) return null;
+    const u = (r.data.users || [])[0];
+    if (!u || !Array.isArray(u.providerUserInfo)) return null;
+    return u.providerUserInfo.some((p) => p.providerId === "password");
+  } catch {
+    return null;
+  }
+}
 function toFirestoreValue(v) {
   if (v === null || v === void 0) return { nullValue: null };
   if (typeof v === "string") return { stringValue: v };
@@ -4358,14 +4369,14 @@ function StockAlertsScreen({ user, stockAlerts, setStockAlerts, setView }) {
     tab.label
   ))), /* @__PURE__ */ React.createElement("div", { className: "space-y-3 pb-4" }, unresolved.length === 0 && /* @__PURE__ */ React.createElement("p", { className: "text-center text-[#64748B] py-8 text-sm" }, "\u0645\u0641\u064A\u0634 \u062A\u0646\u0628\u064A\u0647\u0627\u062A \u062C\u062F\u064A\u062F\u0629"), unresolved.map((a) => /* @__PURE__ */ React.createElement(AlertCard, { key: a.id, a }))), resolved.length > 0 && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowResolved((v) => !v), className: "text-xs text-sky-400 font-semibold mb-3 hover:underline" }, showResolved ? "\u0625\u062E\u0641\u0627\u0621 \u0627\u0644\u0645\u064F\u062A\u0645 \u062D\u0644\u0647\u0627" : `\u0639\u0631\u0636 \u0627\u0644\u0645\u064F\u062A\u0645 \u062D\u0644\u0647\u0627 (${resolved.length})`), showResolved && /* @__PURE__ */ React.createElement("div", { className: "space-y-3 pb-6 opacity-60" }, resolved.map((a) => /* @__PURE__ */ React.createElement(AlertCard, { key: a.id, a }))))));
 }
-function ChangePasswordModal({ user, users, setUsers, onClose }) {
+function ChangePasswordModal({ user, users, setUsers, createMode, onDone, onClose }) {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const save = async () => {
-    if (!currentPassword) {
+    if (!createMode && !currentPassword) {
       setError("\u0627\u0643\u062A\u0628 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629");
       return;
     }
@@ -4378,28 +4389,32 @@ function ChangePasswordModal({ user, users, setUsers, onClose }) {
       return;
     }
     setBusy(true);
-    const email = normalizeEmail(user.authEmail || (currentAuthClaims() || {}).email);
-    const reauth = await signInWithEmailPassword(email, currentPassword);
-    if (reauth.networkError) {
-      setBusy(false);
-      setError("\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
-      return;
+    if (!createMode) {
+      const email = normalizeEmail(user.authEmail || (currentAuthClaims() || {}).email);
+      const reauth = await signInWithEmailPassword(email, currentPassword);
+      if (reauth.networkError) {
+        setBusy(false);
+        setError("\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+        return;
+      }
+      if (!reauth.ok) {
+        setBusy(false);
+        setError(authErrorMessage(reauth.detail, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u0644\u0637"));
+        return;
+      }
+      setAuthTokens(reauth.data);
     }
-    if (!reauth.ok) {
-      setBusy(false);
-      setError(authErrorMessage(reauth.detail, "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629 \u063A\u0644\u0637"));
-      return;
-    }
-    setAuthTokens(reauth.data);
     const res = await updateOwnPassword(newPassword);
     setBusy(false);
     if (!res.ok) {
-      setError(`\u062D\u0635\u0644\u062A \u0645\u0634\u0643\u0644\u0629\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A (${res.detail || "?"})`);
+      if (/CREDENTIAL_TOO_OLD_LOGIN_AGAIN/.test(res.detail || "")) setError("\u0644\u0623\u0645\u0627\u0646\u0643 \u0644\u0627\u0632\u0645 \u062A\u0633\u062C\u0644 \u062F\u062E\u0648\u0644 \u0645\u0646 \u062C\u062F\u064A\u062F \u0627\u0644\u0623\u0648\u0644: \u0627\u0639\u0645\u0644 \u062A\u0633\u062C\u064A\u0644 \u062E\u0631\u0648\u062C \u0648\u0627\u062F\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u062A\u0627\u0646\u064A\u060C \u0648\u0628\u0639\u062F\u0647\u0627 \u0627\u0639\u0645\u0644 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0639\u0644\u0649 \u0637\u0648\u0644");
+      else setError(`\u062D\u0635\u0644\u062A \u0645\u0634\u0643\u0644\u0629\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A (${res.detail || "?"})`);
       return;
     }
+    if (createMode && onDone) onDone();
     onClose();
   };
-  return /* @__PURE__ */ React.createElement(Modal, { title: "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", accent: "#38BDF8", onClose }, /* @__PURE__ */ React.createElement("input", { type: "password", value: currentPassword, onChange: (e) => setCurrentPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: newPassword, onChange: (e) => setNewPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: confirmPassword, onChange: (e) => setConfirmPassword(e.target.value), placeholder: "\u062A\u0623\u0643\u064A\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-3" }), error && /* @__PURE__ */ React.createElement("p", { className: "text-rose-400 text-xs mb-3" }, error), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { disabled: busy, onClick: save, className: "btn-emerald flex-1 rounded-xl py-2 text-sm font-bold disabled:opacity-60" }, "\u062D\u0641\u0638"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "btn-ghost flex-1 rounded-xl py-2 text-sm font-bold" }, "\u0625\u0644\u063A\u0627\u0621")));
+  return /* @__PURE__ */ React.createElement(Modal, { title: createMode ? "\u0625\u0646\u0634\u0627\u0621 \u0643\u0644\u0645\u0629 \u0633\u0631" : "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", accent: "#38BDF8", onClose }, createMode ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#94A3B8] mb-3" }, "\u062D\u0633\u0627\u0628\u0643 \u062F\u0627\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u0648\u0645\u0639\u0646\u062F\u0648\u0634 \u0643\u0644\u0645\u0629 \u0633\u0631. \u0644\u0648 \u0639\u0645\u0644\u062A \u0648\u0627\u062D\u062F\u0629\u060C \u0647\u062A\u0642\u062F\u0631 \u062A\u062F\u062E\u0644 \u0628\u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0643\u0645\u0627\u0646\u060C \u0648\u062A\u0641\u0636\u0644 \u062A\u062F\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u0632\u064A \u0645\u0627 \u0623\u0646\u062A.") : /* @__PURE__ */ React.createElement("input", { type: "password", value: currentPassword, onChange: (e) => setCurrentPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: newPassword, onChange: (e) => setNewPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: confirmPassword, onChange: (e) => setConfirmPassword(e.target.value), placeholder: "\u062A\u0623\u0643\u064A\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-3" }), error && /* @__PURE__ */ React.createElement("p", { className: "text-rose-400 text-xs mb-3" }, error), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { disabled: busy, onClick: save, className: "btn-emerald flex-1 rounded-xl py-2 text-sm font-bold disabled:opacity-60" }, "\u062D\u0641\u0638"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "btn-ghost flex-1 rounded-xl py-2 text-sm font-bold" }, "\u0625\u0644\u063A\u0627\u0621")));
 }
 function TierSettingsModal({ tierSettings, setTierSettings, onClose }) {
   const [tiers, setTiers] = useState(tierSettings.tiers);
@@ -4523,8 +4538,18 @@ function SettingsScreen({ user, users, setUsers, tierSettings, setTierSettings, 
   const canInvoiceNumbering = isAdmin || !!user.permissions?.manageInvoiceNumbering;
   const canBranches = isAdmin || !!user.permissions?.manageBranches;
   const [openSection, setOpenSection] = useState(null);
+  const [hasPassword, setHasPassword] = useState(true);
+  useEffect(() => {
+    let alive = true;
+    accountHasPassword().then((v) => {
+      if (alive && v === false) setHasPassword(false);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   const items = [
-    { key: "password", label: "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", icon: "Lock" },
+    { key: "password", label: hasPassword ? "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631" : "\u0625\u0646\u0634\u0627\u0621 \u0643\u0644\u0645\u0629 \u0633\u0631", icon: "Lock" },
     ...canTierSettings ? [{ key: "tiers", label: "\u0645\u064A\u0632\u0627\u062A \u0625\u0636\u0627\u0641\u064A\u0629", icon: "Settings" }] : [],
     ...canInvoiceNumbering ? [{ key: "invoiceNumbering", label: "\u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631", icon: "Tag" }] : [],
     ...canBranches ? [{ key: "branches", label: "\u0641\u0631\u0648\u0639 \u0627\u0644\u0645\u062D\u0644", icon: "MapPin" }] : []
@@ -4547,7 +4572,7 @@ function SettingsScreen({ user, users, setUsers, tierSettings, setTierSettings, 
     },
     /* @__PURE__ */ React.createElement(Icon, { name: "LogOut", size: 16, className: "text-rose-400" }),
     /* @__PURE__ */ React.createElement("span", { className: "font-bold text-sm text-rose-400" }, "\u062A\u0633\u062C\u064A\u0644 \u062E\u0631\u0648\u062C")
-  )), openSection === "password" && /* @__PURE__ */ React.createElement(ChangePasswordModal, { user, users, setUsers, onClose: () => setOpenSection(null) }), openSection === "tiers" && /* @__PURE__ */ React.createElement(TierSettingsModal, { tierSettings, setTierSettings, onClose: () => setOpenSection(null) }), openSection === "invoiceNumbering" && /* @__PURE__ */ React.createElement(InvoiceNumberSettingsModal, { invoiceNumberSettings, setInvoiceNumberSettings, onClose: () => setOpenSection(null) }), openSection === "branches" && /* @__PURE__ */ React.createElement(BranchSettingsModal, { branchSettings, setBranchSettings, onClose: () => setOpenSection(null) }));
+  )), openSection === "password" && /* @__PURE__ */ React.createElement(ChangePasswordModal, { user, users, setUsers, createMode: !hasPassword, onDone: () => setHasPassword(true), onClose: () => setOpenSection(null) }), openSection === "tiers" && /* @__PURE__ */ React.createElement(TierSettingsModal, { tierSettings, setTierSettings, onClose: () => setOpenSection(null) }), openSection === "invoiceNumbering" && /* @__PURE__ */ React.createElement(InvoiceNumberSettingsModal, { invoiceNumberSettings, setInvoiceNumberSettings, onClose: () => setOpenSection(null) }), openSection === "branches" && /* @__PURE__ */ React.createElement(BranchSettingsModal, { branchSettings, setBranchSettings, onClose: () => setOpenSection(null) }));
 }
 function AdminScreen({ user, users, setUsers, setView }) {
   const pending = users.filter((u) => u.status === "pending");
