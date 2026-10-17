@@ -37,7 +37,7 @@
         try {
           const status = await navigator.permissions.query({ name: "periodic-background-sync" });
           if (status.state === "granted") {
-            await registration.periodicSync.register("check-alawadly-alerts", {
+            await registration.periodicSync.register("check-faaroon-alerts", {
               minInterval: 60 * 60 * 1000,
             });
           }

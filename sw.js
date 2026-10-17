@@ -1,4 +1,4 @@
-const CACHE_NAME = "alawadly-v1";
+const CACHE_NAME = "faaroon-v1";
 const CORE_ASSETS = ["./index.html", "./style.css?v=202609011813", "./app.js", "./manifest.json"];
 // Requests for our own app shell (not Firestore calls or CDN scripts) — these
 // always skip the browser's HTTP cache and go straight to the network, so a

@@ -144,6 +144,73 @@ async function signInWithEmailPassword(email, password) {
     return { ok: false, networkError: true, detail: e.message };
   }
 }
+const GOOGLE_WEB_CLIENT_ID = "106483299926-8ekujag4qe0nau59jl35bqen56t2b8a6.apps.googleusercontent.com";
+let googleScriptPromise = null;
+function loadGoogleIdentityScript() {
+  if (typeof window !== "undefined" && window.google && window.google.accounts && window.google.accounts.oauth2) return Promise.resolve(true);
+  if (googleScriptPromise) return googleScriptPromise;
+  googleScriptPromise = new Promise((resolve) => {
+    try {
+      const el = document.createElement("script");
+      el.src = "https://accounts.google.com/gsi/client";
+      el.async = true;
+      el.onload = () => resolve(true);
+      el.onerror = () => {
+        googleScriptPromise = null;
+        resolve(false);
+      };
+      document.head.appendChild(el);
+    } catch {
+      googleScriptPromise = null;
+      resolve(false);
+    }
+  });
+  return googleScriptPromise;
+}
+async function requestGoogleAccessToken() {
+  const ready = await loadGoogleIdentityScript();
+  if (!ready || !window.google || !window.google.accounts || !window.google.accounts.oauth2) {
+    return { ok: false, networkError: true, detail: "google script not loaded" };
+  }
+  return new Promise((resolve) => {
+    try {
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_WEB_CLIENT_ID,
+        scope: "openid email profile",
+        callback: (resp) => {
+          if (resp && resp.access_token) resolve({ ok: true, accessToken: resp.access_token });
+          else resolve({ ok: false, cancelled: !!resp && resp.error === "access_denied", detail: resp && (resp.error_description || resp.error) || "no token" });
+        },
+        error_callback: (err) => {
+          const type = err && err.type;
+          resolve({ ok: false, cancelled: type === "popup_closed", popupBlocked: type === "popup_failed_to_open", detail: type || "google error" });
+        }
+      });
+      client.requestAccessToken({ prompt: "select_account" });
+    } catch (e) {
+      resolve({ ok: false, detail: e.message });
+    }
+  });
+}
+async function signInWithGoogleAccessToken(accessToken) {
+  try {
+    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=${FIREBASE_API_KEY}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        postBody: `access_token=${encodeURIComponent(accessToken)}&providerId=google.com`,
+        requestUri: typeof window !== "undefined" && window.location && window.location.origin || "http://localhost",
+        returnSecureToken: true,
+        returnIdpCredential: true
+      })
+    });
+    if (!res.ok) return { ok: false, status: res.status, detail: await readErrorDetail(res) };
+    const data = await res.json();
+    return { ok: true, data };
+  } catch (e) {
+    return { ok: false, networkError: true, detail: e.message };
+  }
+}
 async function identityPost(method, body) {
   try {
     const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${method}?key=${FIREBASE_API_KEY}`, {
@@ -1831,10 +1898,16 @@ function AuthInfo({ info }) {
   if (!info) return null;
   return /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-2 text-sm text-emerald-300 bg-emerald-950/40 border border-emerald-900/50 rounded-xl px-3 py-2 mb-4" }, /* @__PURE__ */ React.createElement(Icon, { name: "CheckCircle2", size: 16 }), " ", info);
 }
-function LoginScreen({ onLogin, goRegister, goForgot, error, info, loading }) {
+function GoogleLogo() {
+  return /* @__PURE__ */ React.createElement("svg", { width: "18", height: "18", viewBox: "0 0 48 48", "aria-hidden": "true" }, /* @__PURE__ */ React.createElement("path", { fill: "#EA4335", d: "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" }), /* @__PURE__ */ React.createElement("path", { fill: "#4285F4", d: "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" }), /* @__PURE__ */ React.createElement("path", { fill: "#FBBC05", d: "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" }), /* @__PURE__ */ React.createElement("path", { fill: "#34A853", d: "M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" }));
+}
+function LoginScreen({ onLogin, onGoogle, goRegister, goForgot, error, info, loading }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex items-center justify-center px-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-sm fade-up" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "w-16 h-16 rounded-2xl flex items-center justify-center mb-3 shadow-lg header-bar" }, /* @__PURE__ */ React.createElement(Icon, { name: "Store", size: 30, className: "text-white" })), /* @__PURE__ */ React.createElement("h1", { className: "font-extrabold text-2xl text-sky-400 tracking-wide" }, "FaAroon"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-[#94A3B8] mt-1" }, "\u0646\u0638\u0627\u0645 \u0625\u062F\u0627\u0631\u0629 \u0623\u0633\u0639\u0627\u0631 \u0648\u0645\u0628\u064A\u0639\u0627\u062A \u0627\u0644\u0645\u062D\u0644")), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-6" }, /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0625\u064A\u0645\u064A\u0644", icon: "Send", type: "email", dir: "ltr", autoComplete: "email", value: email, onChange: (e) => setEmail(e.target.value), placeholder: "name@example.com" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", icon: "Lock", type: "password", autoComplete: "current-password", value: password, onChange: (e) => setPassword(e.target.value), placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" }), /* @__PURE__ */ React.createElement(AuthInfo, { info }), /* @__PURE__ */ React.createElement(AuthError, { error }), /* @__PURE__ */ React.createElement("button", { disabled: loading, onClick: () => onLogin(email.trim(), password), className: "btn-sky w-full rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60" }, loading ? /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 18, className: "animate-spin" }) : null, "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644"), /* @__PURE__ */ React.createElement("button", { onClick: () => goForgot(email.trim()), className: "w-full text-center text-sm text-[#94A3B8] mt-4 hover:underline" }, "\u0646\u0633\u064A\u062A \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631\u061F"), /* @__PURE__ */ React.createElement("button", { onClick: goRegister, className: "w-full text-center text-sm text-sky-400 font-semibold mt-3 hover:underline" }, "\u0644\u064A\u0633 \u0644\u062F\u064A\u0643 \u062D\u0633\u0627\u0628\u061F \u0625\u0646\u0634\u0627\u0621 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F"))));
+  useEffect(() => {
+    loadGoogleIdentityScript();
+  }, []);
+  return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex items-center justify-center px-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-sm fade-up" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col items-center mb-6" }, /* @__PURE__ */ React.createElement("div", { className: "w-16 h-16 rounded-2xl flex items-center justify-center mb-3 shadow-lg header-bar" }, /* @__PURE__ */ React.createElement(Icon, { name: "Store", size: 30, className: "text-white" })), /* @__PURE__ */ React.createElement("h1", { className: "font-extrabold text-2xl text-sky-400 tracking-wide" }, "FaAroon"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-[#94A3B8] mt-1" }, "\u0646\u0638\u0627\u0645 \u0625\u062F\u0627\u0631\u0629 \u0623\u0633\u0639\u0627\u0631 \u0648\u0645\u0628\u064A\u0639\u0627\u062A \u0627\u0644\u0645\u062D\u0644")), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-6" }, /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0625\u064A\u0645\u064A\u0644", icon: "Send", type: "email", dir: "ltr", autoComplete: "email", value: email, onChange: (e) => setEmail(e.target.value), placeholder: "name@example.com" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", icon: "Lock", type: "password", autoComplete: "current-password", value: password, onChange: (e) => setPassword(e.target.value), placeholder: "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" }), /* @__PURE__ */ React.createElement(AuthInfo, { info }), /* @__PURE__ */ React.createElement(AuthError, { error }), /* @__PURE__ */ React.createElement("button", { disabled: loading, onClick: () => onLogin(email.trim(), password), className: "btn-sky w-full rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60" }, loading ? /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 18, className: "animate-spin" }) : null, "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644"), /* @__PURE__ */ React.createElement("div", { className: "flex items-center gap-3 my-4" }, /* @__PURE__ */ React.createElement("div", { className: "flex-1 h-px bg-white/10" }), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-[#94A3B8]" }, "\u0623\u0648"), /* @__PURE__ */ React.createElement("div", { className: "flex-1 h-px bg-white/10" })), /* @__PURE__ */ React.createElement("button", { disabled: loading, onClick: () => onGoogle && onGoogle(), className: "w-full rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 bg-white text-gray-800 disabled:opacity-60" }, /* @__PURE__ */ React.createElement(GoogleLogo, null), "\u0627\u0644\u0645\u062A\u0627\u0628\u0639\u0629 \u0628\u062C\u0648\u062C\u0644"), /* @__PURE__ */ React.createElement("button", { onClick: () => goForgot(email.trim()), className: "w-full text-center text-sm text-[#94A3B8] mt-4 hover:underline" }, "\u0646\u0633\u064A\u062A \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631\u061F"), /* @__PURE__ */ React.createElement("button", { onClick: goRegister, className: "w-full text-center text-sm text-sky-400 font-semibold mt-3 hover:underline" }, "\u0644\u064A\u0633 \u0644\u062F\u064A\u0643 \u062D\u0633\u0627\u0628\u061F \u0625\u0646\u0634\u0627\u0621 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F"))));
 }
 function RegisterScreen({ onRegister, goLogin, error, loading }) {
   const [name, setName] = useState("");
@@ -4575,7 +4648,7 @@ function AdminScreen({ user, users, setUsers, setView }) {
     const a = document.createElement("a");
     const dateStr = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
     a.href = url;
-    a.download = `alawadly-backup-${dateStr}.json`;
+    a.download = `faaroon-backup-${dateStr}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -4926,6 +4999,51 @@ function App() {
     }
     await finishVerifiedSignIn(acct.uid, acct.displayName, acct.email);
   };
+  const handleGoogleLogin = async () => {
+    setAuthError("");
+    setAuthInfo("");
+    setAuthLoading(true);
+    const g = await requestGoogleAccessToken();
+    if (!g.ok) {
+      setAuthLoading(false);
+      if (g.cancelled) return;
+      if (g.networkError) setAuthError("\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+      else if (g.popupBlocked) setAuthError("\u0627\u0644\u0645\u062A\u0635\u0641\u062D \u0645\u0646\u0639 \u0646\u0627\u0641\u0630\u0629 \u062C\u0648\u062C\u0644\u060C \u0627\u0633\u0645\u062D \u0628\u0627\u0644\u0646\u0648\u0627\u0641\u0630 \u0627\u0644\u0645\u0646\u0628\u062B\u0642\u0629 \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+      else {
+        console.error("google sign-in failed:", g.detail);
+        setAuthError("\u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u0641\u062A\u062D \u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u062C\u0648\u062C\u0644\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+      }
+      return;
+    }
+    const signIn = await signInWithGoogleAccessToken(g.accessToken);
+    if (signIn.networkError) {
+      setAuthLoading(false);
+      setAuthError("\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+      return;
+    }
+    if (!signIn.ok) {
+      setAuthLoading(false);
+      console.error("google sign-in (firebase) failed:", signIn.detail);
+      if (/OPERATION_NOT_ALLOWED/.test(signIn.detail || "")) setAuthError("\u0627\u0644\u062F\u062E\u0648\u0644 \u0628\u062C\u0648\u062C\u0644 \u0644\u0633\u0647 \u0645\u0634 \u0645\u062A\u0641\u0639\u0651\u0644 \u0639\u0644\u0649 \u0627\u0644\u0645\u0634\u0631\u0648\u0639");
+      else setAuthError(authErrorMessage(signIn.detail, "\u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u062F\u062E\u0644\u0643 \u0628\u062C\u0648\u062C\u0644\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A"));
+      return;
+    }
+    setAuthTokens(signIn.data);
+    const look = await lookupOwnAccount();
+    if (!look.ok) {
+      setAuthLoading(false);
+      setAuthError("\u062D\u0635\u0644\u062A \u0645\u0634\u0643\u0644\u0629 \u0641\u064A \u0627\u0644\u0627\u062A\u0635\u0627\u0644\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+      return;
+    }
+    const acct = look.account;
+    if (!acct.emailVerified) {
+      setAuthLoading(false);
+      clearSession();
+      setAuthError("\u062C\u0648\u062C\u0644 \u0645\u0627 \u0623\u0643\u062F\u0634 \u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u062F\u0647\u060C \u062C\u0631\u0628 \u062D\u0633\u0627\u0628 \u062A\u0627\u0646\u064A \u0623\u0648 \u0633\u062C\u0644 \u0628\u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631");
+      return;
+    }
+    await finishVerifiedSignIn(acct.uid, acct.displayName, acct.email);
+  };
   const handleRegister = async (name, emailInput, password, confirm) => {
     setAuthError("");
     setAuthInfo("");
@@ -5124,7 +5242,7 @@ function App() {
   ), reminder && currentUser && /* @__PURE__ */ React.createElement("div", { className: "fixed top-3 inset-x-3 z-[60] panel rounded-2xl p-4 modal-pop max-w-md mx-auto" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-start justify-between gap-3" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("p", { className: "font-bold text-amber-400 text-sm flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "AlertCircle", size: 14 }), " \u0639\u0646\u062F\u0643 ", reminder.length, " ", reminder.length === 1 ? "\u0623\u0648\u0631\u062F\u0631" : "\u0623\u0648\u0631\u062F\u0631\u0627\u062A", " \u0644\u0633\u0647 \u0645\u0627 \u0627\u062A\u0642\u0641\u0644\u0634"), /* @__PURE__ */ React.createElement("button", { onClick: () => {
     setReminder(null);
     nav("orders");
-  }, className: "text-xs text-sky-400 font-semibold mt-2 hover:underline" }, "\u0631\u0648\u062D \u0644\u0644\u0637\u0644\u0628\u0627\u062A \u062F\u0644\u0648\u0642\u062A\u064A")), /* @__PURE__ */ React.createElement("button", { onClick: () => setReminder(null), className: "text-[#94A3B8] hover:text-white shrink-0" }, /* @__PURE__ */ React.createElement(Icon, { name: "X", size: 16 })))), screen === "login" && /* @__PURE__ */ React.createElement(LoginScreen, { onLogin: handleLogin, goRegister: () => goAuthScreen("register"), goForgot: (em) => {
+  }, className: "text-xs text-sky-400 font-semibold mt-2 hover:underline" }, "\u0631\u0648\u062D \u0644\u0644\u0637\u0644\u0628\u0627\u062A \u062F\u0644\u0648\u0642\u062A\u064A")), /* @__PURE__ */ React.createElement("button", { onClick: () => setReminder(null), className: "text-[#94A3B8] hover:text-white shrink-0" }, /* @__PURE__ */ React.createElement(Icon, { name: "X", size: 16 })))), screen === "login" && /* @__PURE__ */ React.createElement(LoginScreen, { onLogin: handleLogin, onGoogle: handleGoogleLogin, goRegister: () => goAuthScreen("register"), goForgot: (em) => {
     setForgotEmail(em || "");
     goAuthScreen("forgot");
   }, error: authError, info: authInfo, loading: authLoading }), screen === "register" && /* @__PURE__ */ React.createElement(RegisterScreen, { onRegister: handleRegister, goLogin: () => goAuthScreen("login"), error: authError, loading: authLoading }), screen === "verify" && verifyInfo && /* @__PURE__ */ React.createElement(VerifyEmailScreen, { email: verifyInfo.email, onCheck: handleCheckVerified, onResend: handleResendVerification, onBack: handleVerifyBack, error: authError, info: authInfo, loading: authLoading }), screen === "forgot" && /* @__PURE__ */ React.createElement(ForgotPasswordScreen, { initialEmail: forgotEmail, onSend: handleForgotPassword, goLogin: () => goAuthScreen("login"), error: authError, info: authInfo, loading: authLoading }), screen === "pending" && /* @__PURE__ */ React.createElement(PendingScreen, { status: pendingStatus, goLogin: () => setScreen("login") }), screen === "menu" && currentUser && /* @__PURE__ */ React.createElement(MainMenu, { user: currentUser, setView: nav, onLogout: handleLogout, hasNew }), screen === "prices" && currentUser && /* @__PURE__ */ React.createElement(
