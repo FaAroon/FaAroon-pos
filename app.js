@@ -211,6 +211,43 @@ async function signInWithGoogleAccessToken(accessToken) {
     return { ok: false, networkError: true, detail: e.message };
   }
 }
+async function reauthWithGoogle() {
+  try {
+    await ensureAuth();
+  } catch {
+  }
+  const claims = currentAuthClaims() || {};
+  const myEmail = normalizeEmail(claims.email || "");
+  const noNet = "\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A";
+  const g = await requestGoogleAccessToken();
+  if (!g.ok) {
+    if (g.cancelled) return { ok: false, cancelled: true };
+    if (g.networkError) return { ok: false, message: noNet };
+    if (g.popupBlocked) return { ok: false, message: "\u0627\u0644\u0645\u062A\u0635\u0641\u062D \u0645\u0646\u0639 \u0646\u0627\u0641\u0630\u0629 \u062C\u0648\u062C\u0644\u060C \u0627\u0633\u0645\u062D \u0628\u0627\u0644\u0646\u0648\u0627\u0641\u0630 \u0627\u0644\u0645\u0646\u0628\u062B\u0642\u0629 \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A" };
+    return { ok: false, message: "\u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u0641\u062A\u062D \u062A\u0623\u0643\u064A\u062F \u062C\u0648\u062C\u0644\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A" };
+  }
+  let googleEmail = "";
+  try {
+    const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: "Bearer " + g.accessToken } });
+    if (res.ok) {
+      const info = await res.json();
+      if (info && (info.email_verified === true || info.email_verified === "true")) googleEmail = normalizeEmail(info.email || "");
+    }
+  } catch {
+    return { ok: false, message: noNet };
+  }
+  if (!googleEmail || !myEmail || googleEmail !== myEmail) {
+    return { ok: false, message: "\u062D\u0633\u0627\u0628 \u062C\u0648\u062C\u0644 \u0627\u0644\u0644\u064A \u0627\u062E\u062A\u0631\u062A\u0647 \u0645\u0634 \u0628\u062A\u0627\u0639 \u0627\u0644\u062D\u0633\u0627\u0628 \u062F\u0647. \u0627\u062E\u062A\u0627\u0631 \u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u0644\u064A \u0628\u0646\u0641\u0633 \u0625\u064A\u0645\u064A\u0644\u0643" + (myEmail ? ": " + myEmail : "") };
+  }
+  const signIn = await signInWithGoogleAccessToken(g.accessToken);
+  if (signIn.networkError) return { ok: false, message: noNet };
+  if (!signIn.ok || !signIn.data || !signIn.data.idToken) return { ok: false, message: "\u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u0623\u0643\u062F \u0628\u062C\u0648\u062C\u0644\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A" };
+  if (!claims.uid || signIn.data.localId !== claims.uid) {
+    return { ok: false, message: "\u062D\u0633\u0627\u0628 \u062C\u0648\u062C\u0644 \u062F\u0647 \u0645\u0634 \u0645\u0631\u0628\u0648\u0637 \u0628\u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u0644\u064A \u0625\u0646\u062A \u062F\u0627\u062E\u0644 \u0628\u064A\u0647 \u062F\u0644\u0648\u0642\u062A\u064A" };
+  }
+  setAuthTokens(signIn.data);
+  return { ok: true };
+}
 async function identityPost(method, body) {
   try {
     const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:${method}?key=${FIREBASE_API_KEY}`, {
@@ -4375,8 +4412,12 @@ function ChangePasswordModal({ user, users, setUsers, createMode, onDone, onClos
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [useGoogle, setUseGoogle] = useState(false);
+  useEffect(() => {
+    if (!createMode) loadGoogleIdentityScript();
+  }, []);
   const save = async () => {
-    if (!createMode && !currentPassword) {
+    if (!createMode && !useGoogle && !currentPassword) {
       setError("\u0627\u0643\u062A\u0628 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629");
       return;
     }
@@ -4389,7 +4430,14 @@ function ChangePasswordModal({ user, users, setUsers, createMode, onDone, onClos
       return;
     }
     setBusy(true);
-    if (!createMode) {
+    if (!createMode && useGoogle) {
+      const g = await reauthWithGoogle();
+      if (!g.ok) {
+        setBusy(false);
+        if (!g.cancelled) setError(g.message || "\u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u0623\u0643\u062F \u0628\u062C\u0648\u062C\u0644\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+        return;
+      }
+    } else if (!createMode) {
       const email = normalizeEmail(user.authEmail || (currentAuthClaims() || {}).email);
       const reauth = await signInWithEmailPassword(email, currentPassword);
       if (reauth.networkError) {
@@ -4414,7 +4462,13 @@ function ChangePasswordModal({ user, users, setUsers, createMode, onDone, onClos
     if (createMode && onDone) onDone();
     onClose();
   };
-  return /* @__PURE__ */ React.createElement(Modal, { title: createMode ? "\u0625\u0646\u0634\u0627\u0621 \u0643\u0644\u0645\u0629 \u0633\u0631" : "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", accent: "#38BDF8", onClose }, createMode ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#94A3B8] mb-3" }, "\u062D\u0633\u0627\u0628\u0643 \u062F\u0627\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u0648\u0645\u0639\u0646\u062F\u0648\u0634 \u0643\u0644\u0645\u0629 \u0633\u0631. \u0644\u0648 \u0639\u0645\u0644\u062A \u0648\u0627\u062D\u062F\u0629\u060C \u0647\u062A\u0642\u062F\u0631 \u062A\u062F\u062E\u0644 \u0628\u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0643\u0645\u0627\u0646\u060C \u0648\u062A\u0641\u0636\u0644 \u062A\u062F\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u0632\u064A \u0645\u0627 \u0623\u0646\u062A.") : /* @__PURE__ */ React.createElement("input", { type: "password", value: currentPassword, onChange: (e) => setCurrentPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: newPassword, onChange: (e) => setNewPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: confirmPassword, onChange: (e) => setConfirmPassword(e.target.value), placeholder: "\u062A\u0623\u0643\u064A\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-3" }), error && /* @__PURE__ */ React.createElement("p", { className: "text-rose-400 text-xs mb-3" }, error), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { disabled: busy, onClick: save, className: "btn-emerald flex-1 rounded-xl py-2 text-sm font-bold disabled:opacity-60" }, "\u062D\u0641\u0638"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "btn-ghost flex-1 rounded-xl py-2 text-sm font-bold" }, "\u0625\u0644\u063A\u0627\u0621")));
+  return /* @__PURE__ */ React.createElement(Modal, { title: createMode ? "\u0625\u0646\u0634\u0627\u0621 \u0643\u0644\u0645\u0629 \u0633\u0631" : "\u062A\u063A\u064A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", accent: "#38BDF8", onClose }, createMode ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#94A3B8] mb-3" }, "\u062D\u0633\u0627\u0628\u0643 \u062F\u0627\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u0648\u0645\u0639\u0646\u062F\u0648\u0634 \u0643\u0644\u0645\u0629 \u0633\u0631. \u0644\u0648 \u0639\u0645\u0644\u062A \u0648\u0627\u062D\u062F\u0629\u060C \u0647\u062A\u0642\u062F\u0631 \u062A\u062F\u062E\u0644 \u0628\u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0643\u0645\u0627\u0646\u060C \u0648\u062A\u0641\u0636\u0644 \u062A\u062F\u062E\u0644 \u0628\u062C\u0648\u062C\u0644 \u0632\u064A \u0645\u0627 \u0623\u0646\u062A.") : useGoogle ? /* @__PURE__ */ React.createElement("div", { className: "mb-3" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#94A3B8] mb-1" }, "\u0644\u0645\u0627 \u062A\u062F\u0648\u0633 \xAB\u062D\u0641\u0638\xBB \u0647\u062A\u062E\u062A\u0627\u0631 \u062D\u0633\u0627\u0628 \u062C\u0648\u062C\u0644 \u0628\u062A\u0627\u0639\u0643\u060C \u0648\u062F\u0647 \u0628\u064A\u0623\u0643\u062F \u0625\u0646\u0643 \u0635\u0627\u062D\u0628 \u0627\u0644\u062D\u0633\u0627\u0628 \u0645\u0646 \u063A\u064A\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629."), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => {
+    setUseGoogle(false);
+    setError("");
+  }, className: "text-xs text-sky-400 font-semibold" }, "\u0641\u0627\u0643\u0631 \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629\u061F \u0627\u0643\u062A\u0628\u0647\u0627")) : /* @__PURE__ */ React.createElement("div", { className: "mb-2" }, /* @__PURE__ */ React.createElement("input", { type: "password", value: currentPassword, onChange: (e) => setCurrentPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-1" }), /* @__PURE__ */ React.createElement("button", { type: "button", onClick: () => {
+    setUseGoogle(true);
+    setError("");
+  }, className: "text-xs text-sky-400 font-semibold" }, "\u0646\u0633\u064A\u062A \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062D\u0627\u0644\u064A\u0629\u061F \u0623\u0643\u0651\u062F \u0628\u062D\u0633\u0627\u0628 \u062C\u0648\u062C\u0644")), /* @__PURE__ */ React.createElement("input", { type: "password", value: newPassword, onChange: (e) => setNewPassword(e.target.value), placeholder: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631 \u0627\u0644\u062C\u062F\u064A\u062F\u0629", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-2" }), /* @__PURE__ */ React.createElement("input", { type: "password", value: confirmPassword, onChange: (e) => setConfirmPassword(e.target.value), placeholder: "\u062A\u0623\u0643\u064A\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631", className: "field-input w-full rounded-xl px-3 py-2 text-sm mb-3" }), error && /* @__PURE__ */ React.createElement("p", { className: "text-rose-400 text-xs mb-3" }, error), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { disabled: busy, onClick: save, className: "btn-emerald flex-1 rounded-xl py-2 text-sm font-bold disabled:opacity-60" }, "\u062D\u0641\u0638"), /* @__PURE__ */ React.createElement("button", { onClick: onClose, className: "btn-ghost flex-1 rounded-xl py-2 text-sm font-bold" }, "\u0625\u0644\u063A\u0627\u0621")));
 }
 function TierSettingsModal({ tierSettings, setTierSettings, onClose }) {
   const [tiers, setTiers] = useState(tierSettings.tiers);
