@@ -1,13 +1,13 @@
 {
-  "name": "FaAroon",
-  "short_name": "FaAroon",
+  "name": "FaAroon 🧪 Beta",
+  "short_name": "FA Beta",
   "description": "نظام إدارة أسعار ومبيعات المحل",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#0B1224",
-  "theme_color": "#0EA5E9",
+  "theme_color": "#F59E0B",
   "dir": "rtl",
   "lang": "ar",
   "icons": [

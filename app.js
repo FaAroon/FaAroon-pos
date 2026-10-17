@@ -117,6 +117,24 @@ function notifyStoreError(collectionName, detail) {
 function normalizeEmail(email) {
   return String(email || "").trim().toLowerCase();
 }
+const FULL_NAME_HINT = "\u0627\u0643\u062A\u0628 \u0627\u0633\u0645\u0643 \u062B\u0646\u0627\u0626\u064A \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644 (\u0645\u062B\u0627\u0644: \u0625\u0633\u0644\u0627\u0645 \u0623\u062D\u0645\u062F) \u0639\u0634\u0627\u0646 \u0627\u0644\u0623\u062F\u0645\u0646 \u064A\u0639\u0631\u0641 \u064A\u0641\u0631\u0651\u0642 \u0628\u064A\u0646\u0643 \u0648\u0628\u064A\u0646 \u063A\u064A\u0631\u0643";
+function normalizeFullName(name) {
+  return String(name || "").replace(/[\u200B-\u200F\u202A-\u202E]/g, "").replace(/\s+/g, " ").trim();
+}
+function isFullName(name) {
+  const clean = normalizeFullName(name);
+  if (clean.length > 60) return false;
+  const words = clean.split(" ").filter(Boolean);
+  if (words.length < 2) return false;
+  return words.every((w) => w.length >= 2 && /[A-Za-z\u00C0-\u024F\u0600-\u06FF]/.test(w));
+}
+function nameClaimKey(name) {
+  const cleaned = normalizeFullName(name).toLowerCase().replace(/[\u064B-\u065F\u0670\u0640]/g, "").replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627").replace(/\u0649/g, "\u064A").replace(/\u0629/g, "\u0647").replace(/\s+/g, " ").trim();
+  let out = "n";
+  for (let i = 0; i < cleaned.length; i++) out += cleaned.charCodeAt(i).toString(16).padStart(4, "0");
+  return out;
+}
+const NAME_TAKEN_HINT = "\u0627\u0644\u0627\u0633\u0645 \u062F\u0647 \u0645\u0633\u062A\u062E\u062F\u0645 \u0642\u0628\u0644 \u0643\u062F\u0647 \u0644\u0634\u062E\u0635 \u062A\u0627\u0646\u064A \u2014 \u063A\u064A\u0651\u0631\u0647 (\u0627\u0643\u062A\u0628 \u0627\u0633\u0645\u0643 \u0627\u0644\u0643\u0627\u0645\u0644 \u0645\u062E\u062A\u0644\u0641 \u0639\u0646 \u0627\u0644\u0644\u064A \u0645\u0648\u062C\u0648\u062F)";
 function looksLikeEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || "").trim());
 }
@@ -448,7 +466,7 @@ function fromFirestoreFields(fields) {
   });
   return obj;
 }
-const OFFLINE_QUEUE_KEY = "alawadly_offline_queue_v1";
+const OFFLINE_QUEUE_KEY = "dev_alawadly_offline_queue_v1";
 function getOfflineQueue() {
   try {
     return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
@@ -887,6 +905,96 @@ async function createOwnUserDoc(user) {
     return false;
   }
 }
+async function createPendingUserWithNameClaim(user) {
+  const resourceRoot = FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "");
+  try {
+    const token = await ensureAuth();
+    const body = {
+      writes: [
+        {
+          update: { name: `${resourceRoot}/users_col/${user.id}`, fields: toFirestoreFields(user) },
+          currentDocument: { exists: false }
+        },
+        {
+          update: { name: `${resourceRoot}/names_col/${nameClaimKey(user.name)}`, fields: toFirestoreFields({ uid: user.id, name: user.name }) },
+          currentDocument: { exists: false }
+        }
+      ]
+    };
+    const res = await fetch(`${FIRESTORE_BASE}:commit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body)
+    });
+    if (res.ok) return true;
+    const detail = await readErrorDetail(res);
+    if (res.status === 409 || res.status === 400 && /already exists|precondition/i.test(String(detail))) {
+      const mine = await fetchUserDocById(user.id);
+      if (mine) return true;
+      if (mine === null) return "nameTaken";
+      return false;
+    }
+    notifyStoreError("users_col", detail);
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+async function releaseNameClaim(name, ownerUid) {
+  try {
+    const token = await ensureAuth();
+    const url = `${FIRESTORE_BASE}/names_col/${nameClaimKey(name)}`;
+    const got = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!got.ok) return false;
+    const doc = await got.json();
+    const claim = fromFirestoreFields(doc.fields);
+    if (!claim || claim.uid !== ownerUid) return false;
+    const del = await fetch(url, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } });
+    return del.ok;
+  } catch (e) {
+    console.error("releaseNameClaim failed:", e);
+    return false;
+  }
+}
+async function backfillNameClaims(people) {
+  const resourceRoot = FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "");
+  const out = { claimed: 0, already: 0, conflicts: [], failed: 0 };
+  let token;
+  try {
+    token = await ensureAuth();
+  } catch (e) {
+    out.failed = people.length;
+    return out;
+  }
+  for (const p of people) {
+    if (!p || !p.id || !p.name) continue;
+    const url = `${FIRESTORE_BASE}/names_col/${nameClaimKey(p.name)}`;
+    try {
+      const res = await fetch(`${url}?currentDocument.exists=false`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ fields: toFirestoreFields({ uid: p.id, name: p.name }) })
+      });
+      if (res.ok) {
+        out.claimed++;
+        continue;
+      }
+      if (res.status === 409 || res.status === 400) {
+        const got = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (got.ok) {
+          const claim = fromFirestoreFields((await got.json()).fields);
+          if (claim && claim.uid === p.id) out.already++;
+          else out.conflicts.push(p.name);
+          continue;
+        }
+      }
+      out.failed++;
+    } catch (e) {
+      out.failed++;
+    }
+  }
+  return out;
+}
 async function completeAccountSetup({ uid: userId, name, email }) {
   const existing = await fetchUserDocById(userId);
   if (existing === void 0) return { ok: false, reason: "offline" };
@@ -906,7 +1014,9 @@ async function completeAccountSetup({ uid: userId, name, email }) {
     if (await submitBootstrapAtomic(adminUser)) return { ok: true, user: adminUser, becameAdmin: true };
   }
   const newUser = { ...base, role: "employee", status: "pending" };
-  if (await createOwnUserDoc(newUser)) return { ok: true, user: newUser, becameAdmin: false };
+  const created = await createPendingUserWithNameClaim(newUser);
+  if (created === true) return { ok: true, user: newUser, becameAdmin: false };
+  if (created === "nameTaken") return { ok: false, reason: "nameTaken" };
   const again = await fetchUserDocById(userId);
   if (again) return { ok: true, user: again, becameAdmin: false };
   return { ok: false, reason: "failed" };
@@ -1025,7 +1135,7 @@ function todayStr() {
   const d = /* @__PURE__ */ new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-const CURRENT_BRANCH_KEY = "faaroon_current_branch";
+const CURRENT_BRANCH_KEY = "dev_faaroon_current_branch";
 function saveCurrentBranch(branchName) {
   try {
     localStorage.setItem(CURRENT_BRANCH_KEY, branchName || "");
@@ -1133,7 +1243,7 @@ async function attemptInvoiceAggregateWrite(businessDay, branchName, kind, invoi
     return "retry";
   }
 }
-const AGG_QUEUE_KEY = "faaroon_agg_queue_v1";
+const AGG_QUEUE_KEY = "dev_faaroon_agg_queue_v1";
 let aggQueueIdSeq = 0;
 function nextAggQueueId() {
   return `${Date.now()}_${++aggQueueIdSeq}`;
@@ -1279,8 +1389,8 @@ async function batchGetImages(ids) {
     return {};
   }
 }
-const SESSION_KEY = "alawadly_session";
-const SESSION_REFRESH_KEY = "alawadly_auth_refresh";
+const SESSION_KEY = "dev_alawadly_session";
+const SESSION_REFRESH_KEY = "dev_alawadly_auth_refresh";
 function saveSession(user) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ id: user.id }));
@@ -1309,7 +1419,7 @@ function clearSession() {
   }
   clearAuthTokens();
 }
-const CASHIER_INVOICES_KEY = "faaroon_cashier_invoices";
+const CASHIER_INVOICES_KEY = "dev_faaroon_cashier_invoices";
 function saveCashierInvoices(invoices) {
   try {
     localStorage.setItem(CASHIER_INVOICES_KEY, JSON.stringify({ invoices }));
@@ -1407,7 +1517,7 @@ function playBeep(type = "success") {
   } catch (e) {
   }
 }
-const DATA_CACHE_PREFIX = "faaroon_cache_";
+const DATA_CACHE_PREFIX = "dev_faaroon_cache_";
 function saveDataCache(key, data) {
   try {
     localStorage.setItem(DATA_CACHE_PREFIX + key, JSON.stringify(data));
@@ -1423,7 +1533,7 @@ function loadDataCache(key) {
   }
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const IDB_NAME = "faaroon_idb";
+const IDB_NAME = "dev_faaroon_idb";
 const IDB_STORE = "cache";
 function idbOpen() {
   return new Promise((resolve, reject) => {
@@ -1467,7 +1577,7 @@ async function idbSet(key, value) {
   }
 }
 const DATA_EPOCH = "2026-10-real-email-accounts";
-const DATA_EPOCH_KEY = "faaroon_data_epoch";
+const DATA_EPOCH_KEY = "dev_faaroon_data_epoch";
 function purgeLocalDataForNewEpoch() {
   try {
     if (localStorage.getItem(DATA_EPOCH_KEY) === DATA_EPOCH) return false;
@@ -1962,7 +2072,56 @@ function RegisterScreen({ onRegister, goLogin, error, loading }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex items-center justify-center px-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-sm fade-up" }, /* @__PURE__ */ React.createElement("button", { onClick: goLogin, className: "flex items-center gap-1 text-sm text-[#94A3B8] mb-4 hover:text-white" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16 }), " \u0631\u062C\u0648\u0639 \u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644"), /* @__PURE__ */ React.createElement("h1", { className: "font-extrabold text-xl text-sky-400 mb-1" }, "\u0625\u0646\u0634\u0627\u0621 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-[#94A3B8] mb-5" }, "\u0647\u0646\u0628\u0639\u062A\u0644\u0643 \u0631\u0633\u0627\u0644\u0629 \u0639\u0644\u0649 \u0625\u064A\u0645\u064A\u0644\u0643 \u062A\u0623\u0643\u062F \u0628\u064A\u0647\u0627 \u0627\u0644\u062D\u0633\u0627\u0628\u060C \u0648\u0628\u0639\u062F\u0647\u0627 \u0637\u0644\u0628\u0643 \u0628\u064A\u0631\u0648\u062D \u0644\u0644\u0623\u062F\u0645\u0646 \u0639\u0634\u0627\u0646 \u064A\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647"), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-6" }, /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0627\u0633\u0645", icon: "User", value: name, onChange: (e) => setName(e.target.value), placeholder: "\u0627\u0633\u0645\u0643 \u0628\u0627\u0644\u0643\u0627\u0645\u0644" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0625\u064A\u0645\u064A\u0644", icon: "Send", type: "email", dir: "ltr", autoComplete: "email", value: email, onChange: (e) => setEmail(e.target.value), placeholder: "name@example.com" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", icon: "Lock", type: "password", autoComplete: "new-password", value: password, onChange: (e) => setPassword(e.target.value), placeholder: "6 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u062A\u0623\u0643\u064A\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", icon: "KeyRound", type: "password", autoComplete: "new-password", value: confirm, onChange: (e) => setConfirm(e.target.value), placeholder: "\u0627\u0639\u062F \u0643\u062A\u0627\u0628\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" }), /* @__PURE__ */ React.createElement(AuthError, { error }), /* @__PURE__ */ React.createElement("button", { disabled: loading, onClick: () => onRegister(name.trim(), email.trim(), password, confirm), className: "btn-emerald w-full rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60" }, loading ? /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 18, className: "animate-spin" }) : null, "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628"))));
+  const [localError, setLocalError] = useState("");
+  const [pendingName, setPendingName] = useState(null);
+  return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex items-center justify-center px-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-sm fade-up" }, /* @__PURE__ */ React.createElement("button", { onClick: goLogin, className: "flex items-center gap-1 text-sm text-[#94A3B8] mb-4 hover:text-white" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16 }), " \u0631\u062C\u0648\u0639 \u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644"), /* @__PURE__ */ React.createElement("h1", { className: "font-extrabold text-xl text-sky-400 mb-1" }, "\u0625\u0646\u0634\u0627\u0621 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-[#94A3B8] mb-5" }, "\u0647\u0646\u0628\u0639\u062A\u0644\u0643 \u0631\u0633\u0627\u0644\u0629 \u0639\u0644\u0649 \u0625\u064A\u0645\u064A\u0644\u0643 \u062A\u0623\u0643\u062F \u0628\u064A\u0647\u0627 \u0627\u0644\u062D\u0633\u0627\u0628\u060C \u0648\u0628\u0639\u062F\u0647\u0627 \u0637\u0644\u0628\u0643 \u0628\u064A\u0631\u0648\u062D \u0644\u0644\u0623\u062F\u0645\u0646 \u0639\u0634\u0627\u0646 \u064A\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647"), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-6" }, /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0627\u0633\u0645 (\u062B\u0646\u0627\u0626\u064A \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644)", icon: "User", value: name, onChange: (e) => setName(e.target.value), placeholder: "\u0645\u062B\u0627\u0644: \u0625\u0633\u0644\u0627\u0645 \u0623\u062D\u0645\u062F" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0625\u064A\u0645\u064A\u0644", icon: "Send", type: "email", dir: "ltr", autoComplete: "email", value: email, onChange: (e) => setEmail(e.target.value), placeholder: "name@example.com" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", icon: "Lock", type: "password", autoComplete: "new-password", value: password, onChange: (e) => setPassword(e.target.value), placeholder: "6 \u0623\u062D\u0631\u0641 \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644" }), /* @__PURE__ */ React.createElement(TextField, { label: "\u062A\u0623\u0643\u064A\u062F \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", icon: "KeyRound", type: "password", autoComplete: "new-password", value: confirm, onChange: (e) => setConfirm(e.target.value), placeholder: "\u0627\u0639\u062F \u0643\u062A\u0627\u0628\u0629 \u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631" }), /* @__PURE__ */ React.createElement(AuthError, { error: localError || error }), /* @__PURE__ */ React.createElement("button", { disabled: loading, onClick: () => {
+    const cleanName = normalizeFullName(name);
+    if (!isFullName(cleanName)) {
+      setLocalError(FULL_NAME_HINT);
+      return;
+    }
+    setLocalError("");
+    setPendingName(cleanName);
+  }, className: "btn-emerald w-full rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60" }, loading ? /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 18, className: "animate-spin" }) : null, "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628"))), pendingName !== null && /* @__PURE__ */ React.createElement(
+    NameConfirmModal,
+    {
+      name: pendingName,
+      onEdit: () => setPendingName(null),
+      onConfirm: () => {
+        const cleanName = pendingName;
+        setPendingName(null);
+        onRegister(cleanName, email.trim(), password, confirm);
+      }
+    }
+  ));
+}
+function NameConfirmModal({ name, onEdit, onConfirm }) {
+  return /* @__PURE__ */ React.createElement(Modal, { title: "\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0627\u0633\u0645", accent: "#FBBF24", onClose: onEdit }, /* @__PURE__ */ React.createElement("p", { className: "text-sm text-[#94A3B8] mb-2" }, "\u0627\u0633\u0645\u0643 \u0627\u0644\u0644\u064A \u0647\u064A\u0638\u0647\u0631 \u0641\u064A \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0648\u0627\u0644\u062D\u0636\u0648\u0631:"), /* @__PURE__ */ React.createElement("p", { className: "text-lg font-extrabold text-white mb-3" }, name), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-amber-400 mb-5" }, "\u0645\u062A\u0623\u0643\u062F\u061F \u0645\u0634 \u0647\u062A\u0642\u062F\u0631 \u062A\u063A\u064A\u0651\u0631\u0647 \u0628\u0639\u062F \u0643\u062F\u0647."), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: onEdit, className: "flex-1 rounded-xl py-2.5 font-bold border border-[#334155] text-[#CBD5E1]" }, "\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u0627\u0633\u0645"), /* @__PURE__ */ React.createElement("button", { onClick: onConfirm, className: "btn-emerald flex-1 rounded-xl py-2.5 font-bold" }, "\u0623\u064A\u0648\u0647\u060C \u0645\u062A\u0623\u0643\u062F")));
+}
+function ChooseNameScreen({ initialName, email, onConfirm, onBack, error, loading }) {
+  const [name, setName] = useState(initialName || "");
+  const [localError, setLocalError] = useState("");
+  const [pendingName, setPendingName] = useState(null);
+  return /* @__PURE__ */ React.createElement("div", { className: "min-h-screen flex items-center justify-center px-4" }, /* @__PURE__ */ React.createElement("div", { className: "w-full max-w-sm fade-up" }, /* @__PURE__ */ React.createElement("button", { onClick: onBack, className: "flex items-center gap-1 text-sm text-[#94A3B8] mb-4 hover:text-white" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16 }), " \u0631\u062C\u0648\u0639"), /* @__PURE__ */ React.createElement("h1", { className: "font-extrabold text-xl text-sky-400 mb-1" }, "\u0627\u062E\u062A\u0627\u0631 \u0627\u0633\u0645\u0643"), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-[#94A3B8] mb-1" }, "\u0627\u0644\u0627\u0633\u0645 \u062F\u0647 \u0647\u0648 \u0627\u0644\u0644\u064A \u0647\u064A\u0638\u0647\u0631 \u0641\u064A \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0648\u0627\u0644\u062D\u0636\u0648\u0631\u060C \u0648\u0627\u0643\u062A\u0628\u0647 \u062B\u0646\u0627\u0626\u064A \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644."), /* @__PURE__ */ React.createElement("p", { className: "text-sm text-amber-400 mb-5" }, "\u0645\u0634 \u0647\u062A\u0642\u062F\u0631 \u062A\u063A\u064A\u0651\u0631\u0647 \u0628\u0639\u062F \u0643\u062F\u0647\u060C \u0641\u0631\u0627\u062C\u0639\u0647 \u0643\u0648\u064A\u0633."), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-6" }, email ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#64748B] mb-3", dir: "ltr" }, email) : null, /* @__PURE__ */ React.createElement(TextField, { label: "\u0627\u0644\u0627\u0633\u0645 (\u062B\u0646\u0627\u0626\u064A \u0639\u0644\u0649 \u0627\u0644\u0623\u0642\u0644)", icon: "User", value: name, onChange: (e) => setName(e.target.value), placeholder: "\u0645\u062B\u0627\u0644: \u0625\u0633\u0644\u0627\u0645 \u0623\u062D\u0645\u062F" }), /* @__PURE__ */ React.createElement(AuthError, { error: localError || error }), /* @__PURE__ */ React.createElement("button", { disabled: loading, onClick: () => {
+    const cleanName = normalizeFullName(name);
+    if (!isFullName(cleanName)) {
+      setLocalError(FULL_NAME_HINT);
+      return;
+    }
+    setLocalError("");
+    setPendingName(cleanName);
+  }, className: "btn-emerald w-full rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 disabled:opacity-60" }, loading ? /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 18, className: "animate-spin" }) : null, "\u062A\u0623\u0643\u064A\u062F \u0648\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u062D\u0633\u0627\u0628"))), pendingName !== null && /* @__PURE__ */ React.createElement(
+    NameConfirmModal,
+    {
+      name: pendingName,
+      onEdit: () => setPendingName(null),
+      onConfirm: () => {
+        const cleanName = pendingName;
+        setPendingName(null);
+        onConfirm(cleanName);
+      }
+    }
+  ));
 }
 function VerifyEmailScreen({ email, onCheck, onResend, onBack, error, info, loading }) {
   const [cooldown, setCooldown] = useState(0);
@@ -4685,6 +4844,16 @@ function AdminScreen({ user, users, setUsers, setView }) {
     if (target && target.role === "admin" && !isSeniorTo(user, target)) return;
     setUsers(users.filter((u) => u.id !== id));
     usersStore.remove(id);
+    if (target && target.name) releaseNameClaim(target.name, id);
+  };
+  const [claimingNames, setClaimingNames] = useState(false);
+  const [claimResult, setClaimResult] = useState(null);
+  const claimExistingNames = async () => {
+    setClaimingNames(true);
+    setClaimResult(null);
+    const res = await backfillNameClaims(users);
+    setClaimResult(res);
+    setClaimingNames(false);
   };
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -4773,7 +4942,7 @@ function AdminScreen({ user, users, setUsers, setView }) {
         e.target.value = "";
       }
     }
-  )))), legacyUsers.length > 0 && /* @__PURE__ */ React.createElement("section", null, /* @__PURE__ */ React.createElement("h2", { className: "font-bold text-sm text-sky-400 mb-3" }, "\u062A\u062D\u062F\u064A\u062B \u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646"), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-4 space-y-2" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#CBD5E1]" }, "\u0641\u064A\u0647 ", legacyUsers.length, " \u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0645\u062A\u062E\u0632\u0646 \u0628\u0637\u0631\u064A\u0642\u0629 \u0642\u062F\u064A\u0645\u0629\u060C \u0644\u0627\u0632\u0645 \u0646\u062D\u062F\u062B\u0647\u0627 \u0627\u0644\u0623\u0648\u0644 \u0642\u0628\u0644 \u0645\u0627 \u0646\u0642\u062F\u0631 \u0646\u0623\u0645\u0651\u0646 \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0635\u062D. \u064A\u0641\u0636\u0651\u0644 \u062A\u0639\u0645\u0644 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u0641\u0648\u0642 \u0642\u0628\u0644 \u0645\u0627 \u062A\u0639\u0645\u0644 \u0627\u0644\u062A\u062D\u062F\u064A\u062B \u062F\u0647."), migrateDone ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-emerald-400 font-bold flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "CheckCircle2", size: 14 }), " \u062A\u0645 \u0627\u0644\u062A\u062D\u062F\u064A\u062B") : /* @__PURE__ */ React.createElement("button", { onClick: migrateUserIds, disabled: migrating, className: "btn-emerald w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2" }, migrating ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 16, className: "animate-spin" }), " \u0628\u064A\u062D\u062F\u062B... ", migrateProgress) : "\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u062F\u0644\u0648\u0642\u062A\u064A")))));
+  )))), /* @__PURE__ */ React.createElement("section", null, /* @__PURE__ */ React.createElement("h2", { className: "font-bold text-sm text-sky-400 mb-3" }, "\u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 (\u0645\u0646\u0639 \u062A\u0643\u0631\u0627\u0631 \u0627\u0644\u0627\u0633\u0645)"), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-4 space-y-2" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#CBD5E1]" }, "\u0627\u0644\u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0628\u062A\u062A\u0633\u062C\u0651\u0644 \u0644\u0648\u062D\u062F\u0647\u0627. \u0627\u0636\u063A\u0637 \u0647\u0646\u0627 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0639\u0634\u0627\u0646 \u062A\u0633\u062C\u0651\u0644 \u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u0627\u0644\u0645\u0648\u062C\u0648\u062F\u064A\u0646 \u062F\u0644\u0648\u0642\u062A\u064A\u060C \u0641\u0645\u062D\u062F\u0634 \u062C\u062F\u064A\u062F \u064A\u0642\u062F\u0631 \u064A\u0633\u062C\u0651\u0644 \u0628\u0646\u0641\u0633 \u0627\u0644\u0627\u0633\u0645 \u0627\u0644\u0643\u0627\u0645\u0644."), /* @__PURE__ */ React.createElement("button", { onClick: claimExistingNames, disabled: claimingNames, className: "btn-emerald w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2" }, claimingNames ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 16, className: "animate-spin" }), " \u0628\u064A\u0633\u062C\u0651\u0644...") : "\u062A\u0633\u062C\u064A\u0644 \u0623\u0633\u0645\u0627\u0621 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u0627\u0644\u062D\u0627\u0644\u064A\u064A\u0646"), claimResult && /* @__PURE__ */ React.createElement("div", { className: "text-xs space-y-1" }, /* @__PURE__ */ React.createElement("p", { className: "text-emerald-400 font-bold" }, "\u0627\u062A\u0633\u062C\u0651\u0644 ", claimResult.claimed, " \u0627\u0633\u0645 \u062C\u062F\u064A\u062F\u060C \u0648", claimResult.already, " \u0643\u0627\u0646\u0648\u0627 \u0645\u062A\u0633\u062C\u0651\u0644\u064A\u0646 \u0642\u0628\u0644 \u0643\u062F\u0647."), claimResult.conflicts.length > 0 && /* @__PURE__ */ React.createElement("p", { className: "text-amber-400" }, "\u26A0\uFE0F \u0623\u0633\u0645\u0627\u0621 \u0645\u062A\u0643\u0631\u0631\u0629 \u0628\u064A\u0646 \u0645\u0648\u0638\u0641\u064A\u0646 \u0645\u0648\u062C\u0648\u062F\u064A\u0646 (\u0644\u0627\u0632\u0645 \u062A\u062A\u062D\u0644): ", claimResult.conflicts.join("\u060C ")), claimResult.failed > 0 && /* @__PURE__ */ React.createElement("p", { className: "text-rose-400" }, claimResult.failed, " \u0627\u0633\u0645 \u0645\u0627\u062A\u0633\u062C\u0644\u0634 (\u0627\u062A\u0623\u0643\u062F \u0625\u0646 \u0642\u0648\u0627\u0639\u062F \u0627\u0644\u0623\u0645\u0627\u0646 \u0627\u0644\u062C\u062F\u064A\u062F\u0629 \u0645\u0646\u0634\u0648\u0631\u0629\u060C \u0648\u0625\u0646\u0643 \u0623\u062F\u0645\u0646\u060C \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A).")))), legacyUsers.length > 0 && /* @__PURE__ */ React.createElement("section", null, /* @__PURE__ */ React.createElement("h2", { className: "font-bold text-sm text-sky-400 mb-3" }, "\u062A\u062D\u062F\u064A\u062B \u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646"), /* @__PURE__ */ React.createElement("div", { className: "panel rounded-2xl p-4 space-y-2" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#CBD5E1]" }, "\u0641\u064A\u0647 ", legacyUsers.length, " \u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0645\u062A\u062E\u0632\u0646 \u0628\u0637\u0631\u064A\u0642\u0629 \u0642\u062F\u064A\u0645\u0629\u060C \u0644\u0627\u0632\u0645 \u0646\u062D\u062F\u062B\u0647\u0627 \u0627\u0644\u0623\u0648\u0644 \u0642\u0628\u0644 \u0645\u0627 \u0646\u0642\u062F\u0631 \u0646\u0623\u0645\u0651\u0646 \u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0635\u062D. \u064A\u0641\u0636\u0651\u0644 \u062A\u0639\u0645\u0644 \u0646\u0633\u062E\u0629 \u0627\u062D\u062A\u064A\u0627\u0637\u064A\u0629 \u0641\u0648\u0642 \u0642\u0628\u0644 \u0645\u0627 \u062A\u0639\u0645\u0644 \u0627\u0644\u062A\u062D\u062F\u064A\u062B \u062F\u0647."), migrateDone ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-emerald-400 font-bold flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "CheckCircle2", size: 14 }), " \u062A\u0645 \u0627\u0644\u062A\u062D\u062F\u064A\u062B") : /* @__PURE__ */ React.createElement("button", { onClick: migrateUserIds, disabled: migrating, className: "btn-emerald w-full rounded-xl py-2.5 text-sm font-bold flex items-center justify-center gap-2" }, migrating ? /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 16, className: "animate-spin" }), " \u0628\u064A\u062D\u062F\u062B... ", migrateProgress) : "\u062A\u062D\u062F\u064A\u062B \u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u062F\u0644\u0648\u0642\u062A\u064A")))));
 }
 function App() {
   const [booting, setBooting] = useState(true);
@@ -4796,6 +4965,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authInfo, setAuthInfo] = useState("");
   const [verifyInfo, setVerifyInfo] = useState(null);
+  const [nameSetup, setNameSetup] = useState(null);
   const [forgotEmail, setForgotEmail] = useState("");
   const [lastSeen, setLastSeen] = useState({ prices: 0, reports: 0 });
   const [reminder, setReminder] = useState(null);
@@ -5009,8 +5179,30 @@ function App() {
     setAuthInfo("");
     setScreen(name);
   };
-  const finishVerifiedSignIn = async (accountUid, name, email) => {
+  const finishVerifiedSignIn = async (accountUid, name, email, opts) => {
+    if (opts && opts.confirmName || !isFullName(name)) {
+      const known = await fetchUserDocById(accountUid);
+      if (known === void 0) {
+        setAuthLoading(false);
+        setAuthError("\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
+        return;
+      }
+      if (!known) {
+        setAuthLoading(false);
+        setAuthError("");
+        setNameSetup({ uid: accountUid, email, name: name || "" });
+        setScreen("chooseName");
+        return;
+      }
+    }
     const result = await completeAccountSetup({ uid: accountUid, name, email });
+    if (!result.ok && result.reason === "nameTaken") {
+      setAuthLoading(false);
+      setAuthError(NAME_TAKEN_HINT);
+      setNameSetup({ uid: accountUid, email, name: name || "" });
+      setScreen("chooseName");
+      return;
+    }
     if (!result.ok) {
       setAuthLoading(false);
       setAuthError(result.reason === "offline" ? "\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A\u060C \u062A\u0623\u0643\u062F \u0645\u0646 \u0627\u0644\u0646\u062A \u0648\u062C\u0631\u0628 \u062A\u0627\u0646\u064A" : "\u062D\u0635\u0644\u062A \u0645\u0634\u0643\u0644\u0629 \u0641\u064A \u062D\u0641\u0638 \u062D\u0633\u0627\u0628\u0643\u060C \u062C\u0631\u0628 \u062A\u0627\u0646\u064A");
@@ -5121,7 +5313,7 @@ function App() {
       setAuthError("\u062C\u0648\u062C\u0644 \u0645\u0627 \u0623\u0643\u062F\u0634 \u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u062F\u0647\u060C \u062C\u0631\u0628 \u062D\u0633\u0627\u0628 \u062A\u0627\u0646\u064A \u0623\u0648 \u0633\u062C\u0644 \u0628\u0627\u0644\u0625\u064A\u0645\u064A\u0644 \u0648\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631");
       return;
     }
-    await finishVerifiedSignIn(acct.uid, acct.displayName, acct.email);
+    await finishVerifiedSignIn(acct.uid, acct.displayName, acct.email, { confirmName: true });
   };
   const handleRegister = async (name, emailInput, password, confirm) => {
     setAuthError("");
@@ -5158,6 +5350,23 @@ function App() {
     setVerifyInfo({ email, name });
     if (!sent.ok) setAuthError("\u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u062A\u0639\u0645\u0644 \u0628\u0633 \u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u0628\u0639\u062A \u0631\u0633\u0627\u0644\u0629 \u0627\u0644\u062A\u0623\u0643\u064A\u062F\u060C \u062F\u0648\u0633 \xAB\u0627\u0628\u0639\u062A \u0627\u0644\u0631\u0633\u0627\u0644\u0629 \u062A\u0627\u0646\u064A\xBB");
     setScreen("verify");
+  };
+  const handleConfirmName = async (nameInput) => {
+    setAuthError("");
+    setAuthInfo("");
+    const name = normalizeFullName(nameInput);
+    if (!isFullName(name)) {
+      setAuthError(FULL_NAME_HINT);
+      return;
+    }
+    if (!nameSetup) return;
+    setAuthLoading(true);
+    await finishVerifiedSignIn(nameSetup.uid, name, nameSetup.email);
+  };
+  const handleChooseNameBack = () => {
+    clearSession();
+    setNameSetup(null);
+    goAuthScreen("login");
   };
   const handleCheckVerified = async () => {
     setAuthError("");
@@ -5324,7 +5533,7 @@ function App() {
   }, className: "text-xs text-sky-400 font-semibold mt-2 hover:underline" }, "\u0631\u0648\u062D \u0644\u0644\u0637\u0644\u0628\u0627\u062A \u062F\u0644\u0648\u0642\u062A\u064A")), /* @__PURE__ */ React.createElement("button", { onClick: () => setReminder(null), className: "text-[#94A3B8] hover:text-white shrink-0" }, /* @__PURE__ */ React.createElement(Icon, { name: "X", size: 16 })))), screen === "login" && /* @__PURE__ */ React.createElement(LoginScreen, { onLogin: handleLogin, onGoogle: handleGoogleLogin, goRegister: () => goAuthScreen("register"), goForgot: (em) => {
     setForgotEmail(em || "");
     goAuthScreen("forgot");
-  }, error: authError, info: authInfo, loading: authLoading }), screen === "register" && /* @__PURE__ */ React.createElement(RegisterScreen, { onRegister: handleRegister, goLogin: () => goAuthScreen("login"), error: authError, loading: authLoading }), screen === "verify" && verifyInfo && /* @__PURE__ */ React.createElement(VerifyEmailScreen, { email: verifyInfo.email, onCheck: handleCheckVerified, onResend: handleResendVerification, onBack: handleVerifyBack, error: authError, info: authInfo, loading: authLoading }), screen === "forgot" && /* @__PURE__ */ React.createElement(ForgotPasswordScreen, { initialEmail: forgotEmail, onSend: handleForgotPassword, goLogin: () => goAuthScreen("login"), error: authError, info: authInfo, loading: authLoading }), screen === "pending" && /* @__PURE__ */ React.createElement(PendingScreen, { status: pendingStatus, goLogin: () => setScreen("login") }), screen === "menu" && currentUser && /* @__PURE__ */ React.createElement(MainMenu, { user: currentUser, setView: nav, onLogout: handleLogout, hasNew }), screen === "prices" && currentUser && /* @__PURE__ */ React.createElement(
+  }, error: authError, info: authInfo, loading: authLoading }), screen === "register" && /* @__PURE__ */ React.createElement(RegisterScreen, { onRegister: handleRegister, goLogin: () => goAuthScreen("login"), error: authError, loading: authLoading }), screen === "chooseName" && nameSetup && /* @__PURE__ */ React.createElement(ChooseNameScreen, { initialName: nameSetup.name, email: nameSetup.email, onConfirm: handleConfirmName, onBack: handleChooseNameBack, error: authError, loading: authLoading }), screen === "verify" && verifyInfo && /* @__PURE__ */ React.createElement(VerifyEmailScreen, { email: verifyInfo.email, onCheck: handleCheckVerified, onResend: handleResendVerification, onBack: handleVerifyBack, error: authError, info: authInfo, loading: authLoading }), screen === "forgot" && /* @__PURE__ */ React.createElement(ForgotPasswordScreen, { initialEmail: forgotEmail, onSend: handleForgotPassword, goLogin: () => goAuthScreen("login"), error: authError, info: authInfo, loading: authLoading }), screen === "pending" && /* @__PURE__ */ React.createElement(PendingScreen, { status: pendingStatus, goLogin: () => setScreen("login") }), screen === "menu" && currentUser && /* @__PURE__ */ React.createElement(MainMenu, { user: currentUser, setView: nav, onLogout: handleLogout, hasNew }), screen === "prices" && currentUser && /* @__PURE__ */ React.createElement(
     PricesScreen,
     {
       user: currentUser,
@@ -5683,5 +5892,510 @@ function ReturnsScreen({ user, sales, setView }) {
     );
   })), totalPages > 1 && /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-4 mt-4" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setPage((p) => Math.max(0, p - 1)), disabled: pageSafe === 0, className: "btn-ghost rounded-xl p-2 disabled:opacity-30" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16, style: { transform: "rotate(180deg)" } })), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-[#94A3B8]" }, pageSafe + 1, " \u0645\u0646 ", totalPages), /* @__PURE__ */ React.createElement("button", { onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)), disabled: pageSafe >= totalPages - 1, className: "btn-ghost rounded-xl p-2 disabled:opacity-30" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16 })))));
 }
+const FAAROON_DEV_BUILD = true;
+const SYSTEM_TEST_EXPECTED_PROJECT = "alawadly-53e7d";
+const SYSTEM_TEST_PREFIX = "__sys_test_";
+const SYSTEM_TEST_AMOUNT = 7;
+(function mountBetaBanner() {
+  try {
+    const bar = document.createElement("div");
+    bar.id = "faaroon-beta-banner";
+    bar.textContent = "\u{1F9EA} \u0646\u0633\u062E\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 / Beta \u2014 Firebase \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A (\u0628\u064A\u0627\u0646\u0627\u062A\u0647 \u062A\u062C\u0631\u064A\u0628\u064A\u0629)";
+    bar.setAttribute(
+      "style",
+      "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:calc(2px + env(safe-area-inset-top, 0px)) 8px 2px;background:#DC2626;color:#FFFFFF;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;"
+    );
+    document.body.appendChild(bar);
+  } catch (e) {
+  }
+})();
+async function sysTestHttp(method, url, token, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: body ? JSON.stringify(body) : void 0
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch (e) {
+    json = null;
+  }
+  let detail = "";
+  if (!res.ok && json && json.error) detail = `${json.error.status || ""} ${json.error.message || ""}`.trim();
+  return { ok: res.ok, status: res.status, detail, json };
+}
+function sysTestExpectations(role) {
+  const canRead = role === "admin" || role === "viewReports";
+  const approved = role !== "pending";
+  return { commitOk: approved, readOk: canRead };
+}
+async function runSystemTestStep1(role, log) {
+  const runId = Date.now().toString(36);
+  const testDay = `${SYSTEM_TEST_PREFIX}${runId}`;
+  const invoiceId = `${SYSTEM_TEST_PREFIX}${runId}_inv`;
+  const branch = "\u0627\u062E\u062A\u0628\u0627\u0631";
+  const exp = sysTestExpectations(role);
+  const results = [];
+  const record = (id, title, expectedOk, actualOk, yes, no, extra) => {
+    const match = expectedOk === actualOk;
+    results.push({ id, title, expectedOk, actualOk, match });
+    log(`${match ? "\u2705" : "\u274C"} ${id} ${title}
+    \u0627\u0644\u0645\u062A\u0648\u0642\u0639: ${expectedOk ? yes : no} | \u0627\u0644\u0641\u0639\u0644\u064A: ${actualOk ? yes : no}${extra ? "\n    " + extra : ""}`);
+  };
+  log(`\u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${FIREBASE_PROJECT_ID}`);
+  if (FIREBASE_PROJECT_ID !== SYSTEM_TEST_EXPECTED_PROJECT) {
+    log(`\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.`);
+    return { aborted: true, results };
+  }
+  const token = await ensureAuth();
+  let who = "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641";
+  try {
+    const claims = decodeIdTokenClaims(token) || {};
+    who = `${claims.email || "\u0628\u062F\u0648\u0646 \u0625\u064A\u0645\u064A\u0644"} - verified: ${claims.email_verified === true ? "\u0646\u0639\u0645" : "\u0644\u0627"}`;
+  } catch (e) {
+    who = "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628";
+  }
+  log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${who}`);
+  log(`\u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u062E\u062A\u0627\u0631 \u0644\u0644\u0641\u062D\u0635: ${role}`);
+  const realDay = businessDayOf(Date.now());
+  const monthId = realDay.slice(0, 7);
+  const resourceRoot = FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "");
+  const monthCol = ["monthly", "aggregates", "col"].join("_");
+  const monthDocUrl = `${FIRESTORE_BASE}/${monthCol}/${monthId}`;
+  const monthDocName = `${resourceRoot}/monthly_aggregates_col/${monthId}`;
+  const guardName = `${resourceRoot}/invoice_aggregate_writes_col/${invoiceId}`;
+  const fieldPath = firestoreFieldPath(["days", testDay, branch, "sales", invoiceId]);
+  log("\u2014 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u0644\u0644\u064A \u0647\u0644\u0645\u0633\u0647\u0627 \u2014");
+  log(`1) invoice_aggregate_writes_col/${invoiceId}  \u0625\u0646\u0634\u0627\u0621\u060C \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0630\u0641 \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642`);
+  log(`2) monthly_aggregates_col/${monthId}  \u062D\u0642\u0644 days.${testDay} \u0641\u0642\u0637`);
+  log("");
+  const commitBody = () => ({
+    writes: [
+      {
+        update: {
+          name: guardName,
+          fields: toFirestoreFields({ invoiceId, businessDay: testDay, branch, kind: "sales", amount: SYSTEM_TEST_AMOUNT })
+        },
+        currentDocument: { exists: false }
+      },
+      {
+        transform: {
+          document: monthDocName,
+          fieldTransforms: [{ fieldPath, increment: toFirestoreValue(SYSTEM_TEST_AMOUNT) }]
+        }
+      }
+    ]
+  });
+  const safe = async (fn) => {
+    try {
+      return await fn();
+    } catch (e) {
+      return { ok: false, status: 0, detail: `network: ${e.message}`, json: null };
+    }
+  };
+  const t1 = await safe(() => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, commitBody()));
+  record("S1-T1", "\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0628\u0640:commit \u0628\u062F\u0648\u0646 \u0642\u0631\u0627\u0621\u0629", exp.commitOk, t1.ok, "\u0646\u062C\u062D", "\u0627\u062A\u0631\u0641\u0636", `HTTP ${t1.status} ${t1.detail}`);
+  const t2 = await safe(() => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, commitBody()));
+  record("S1-T2", "\u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0640commit \u0644\u0627\u0632\u0645 \u062A\u062A\u0631\u0641\u0636", false, t2.ok, "\u0646\u062C\u062D", "\u0627\u062A\u0631\u0641\u0636", `HTTP ${t2.status} ${t2.detail}`);
+  const t3 = await safe(() => sysTestHttp("GET", monthDocUrl, token));
+  record("S1-T3", "\u0642\u0631\u0627\u0621\u0629 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631", exp.readOk, t3.ok, "\u0646\u062C\u062D\u062A", "\u0627\u062A\u0631\u0641\u0636\u062A", `HTTP ${t3.status} ${t3.detail}`);
+  if (t3.ok && t3.json && t3.json.fields) {
+    let value = null;
+    try {
+      const days = fromFirestoreFields(t3.json.fields).days || {};
+      const node = days[testDay] && days[testDay][branch] && days[testDay][branch].sales;
+      value = node ? node[invoiceId] : null;
+    } catch (e) {
+      value = null;
+    }
+    record("S1-T4", "\u0627\u0644\u0642\u064A\u0645\u0629 \u0627\u0644\u0645\u0633\u062C\u0644\u0629 = \u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633", true, value === SYSTEM_TEST_AMOUNT, "\u062A\u0633\u0627\u0648\u064A " + SYSTEM_TEST_AMOUNT, "\u0645\u062E\u062A\u0644\u0641\u0629: " + String(value));
+  } else {
+    log("\u23ED\uFE0F S1-T4 \u0627\u062A\u062E\u0637\u0649: \u0627\u0644\u062D\u0633\u0627\u0628 \u062F\u0647 \u0645\u0627 \u0642\u0631\u0627\u0634 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u060C \u0641\u0645\u0634 \u0647\u064A\u0646\u0641\u0639 \u0623\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0642\u064A\u0645\u0629 \u0645\u0646 \u0647\u0646\u0627.");
+  }
+  if (t1.ok) {
+    const t5 = await safe(
+      () => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, {
+        writes: [{ update: { name: monthDocName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
+      })
+    );
+    log(`${t5.ok ? "\u{1F9F9}" : "\u26A0\uFE0F"} S1-T5 \u062A\u0646\u0638\u064A\u0641 \u062D\u0642\u0644 days.${testDay}: ${t5.ok ? "\u062A\u0645" : "\u0645\u0627 \u0627\u062A\u0645\u0633\u062D\u0634"} | HTTP ${t5.status} ${t5.detail}`);
+    if (!t5.ok) log(`   \u0627\u0645\u0633\u062D \u0627\u0644\u062D\u0642\u0644 \u062F\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console: monthly_aggregates_col/${monthId} \u2190 days \u2190 ${testDay}`);
+  } else {
+    log("\u23ED\uFE0F S1-T5 \u0645\u0641\u064A\u0634 \u062A\u0646\u0638\u064A\u0641: \u0627\u0644\u0643\u062A\u0627\u0628\u0629 \u0627\u0644\u0623\u0648\u0644\u0649 \u0645\u0627 \u0646\u062C\u062D\u062A\u0634.");
+  }
+  log("");
+  log("\u2014 \u062A\u0646\u0638\u064A\u0641 \u064A\u062F\u0648\u064A \u0645\u0637\u0644\u0648\u0628 \u0645\u0646 Firebase Console \u2014");
+  if (t1.ok) log(`\u0627\u0645\u0633\u062D \u0627\u0644\u0645\u0633\u062A\u0646\u062F: invoice_aggregate_writes_col/${invoiceId}`);
+  else log("\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u062A\u0643\u062A\u0628\u062A.");
+  const bad = results.filter((r) => !r.match).length;
+  log("");
+  log(bad === 0 ? `\u0627\u0644\u0646\u062A\u064A\u062C\u0629: ${results.length} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0645\u062A\u0648\u0642\u0639` : `\u0627\u0644\u0646\u062A\u064A\u062C\u0629: ${bad} \u0641\u062D\u0635 \u0645\u062E\u0627\u0644\u0641 \u0644\u0644\u0645\u062A\u0648\u0642\u0639 \u0645\u0646 ${results.length}`);
+  return { aborted: false, results };
+}
+const SYS_OLD_TS = 9466848e5;
+const sysFmt = (v) => typeof v === "string" ? v : JSON.stringify(v);
+async function sysDetectAccount() {
+  try {
+    const token = await ensureAuth();
+    const claims = decodeIdTokenClaims(token) || {};
+    const uid2 = claims.user_id || claims.sub || null;
+    const email = claims.email || "";
+    const me = uid2 ? await fetchUserDocById(uid2) : null;
+    if (me === void 0) return { ok: false, role: "offline", email, label: "\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u2014 \u0645\u0642\u062F\u0631\u062A\u0634 \u0623\u0639\u0631\u0641 \u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628" };
+    if (!me) return { ok: true, role: "unknown", email, name: "", step1Role: "pending", label: `${email} \u2014 \u0645\u0641\u064A\u0634 \u0633\u062C\u0644 \u062D\u0633\u0627\u0628` };
+    const role = me.status !== "approved" ? "pending" : me.role === "admin" ? "admin" : "employee";
+    const step1Role = role === "admin" ? "admin" : role === "pending" ? "pending" : me.permissions && me.permissions.viewReports ? "viewReports" : "cashier";
+    const roleLabel = role === "admin" ? "\u0623\u062F\u0645\u0646" : role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : "\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647";
+    return { ok: true, role, step1Role, uid: uid2, email, name: me.name || "", label: `${me.name || email} \u2014 ${roleLabel}` };
+  } catch (e) {
+    return { ok: false, role: "error", email: "", label: "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628" };
+  }
+}
+function sysMakeContext(acct, runId, log, sink, token) {
+  const c = {
+    role: acct.role,
+    runId,
+    shared: {},
+    http: async (method, url, body) => {
+      try {
+        return await sysTestHttp(method, url, token, body);
+      } catch (e) {
+        return { ok: false, status: 0, detail: `network: ${e.message}`, json: null };
+      }
+    },
+    docUrl: (col, id) => `${FIRESTORE_BASE}/${col}/${id}`,
+    getDoc: async (col, id) => {
+      const r = await c.http("GET", c.docUrl(col, id));
+      return { status: r.status, data: r.ok && r.json && r.json.fields ? fromFirestoreFields(r.json.fields) : null };
+    },
+    putDoc: (col, id, obj) => c.http("PATCH", c.docUrl(col, id), { fields: toFirestoreFields(obj) }),
+    check: (id, title, expected, actual, extra) => {
+      const match = JSON.stringify(expected) === JSON.stringify(actual);
+      sink.results.push({ id, title, expected, actual, match });
+      log(`${match ? "\u2705" : "\u274C"} ${id} ${title}
+    \u0627\u0644\u0645\u062A\u0648\u0642\u0639: ${sysFmt(expected)} | \u0627\u0644\u0641\u0639\u0644\u064A: ${sysFmt(actual)}${extra ? "\n    " + extra : ""}`);
+      return match;
+    },
+    skip: (id, title, why) => {
+      sink.results.push({ id, title, skipped: true, why });
+      log(`\u23ED\uFE0F ${id} ${title} \u2014 ${why}`);
+    },
+    note: (t) => log(`   \u2139\uFE0F ${t}`),
+    leftover: (path, why) => sink.leftovers.push(`${path} \u2014 ${why}`),
+    sale: (tag, extra) => {
+      const id = `${SYSTEM_TEST_PREFIX}${runId}_${tag}`;
+      return Object.assign(
+        {
+          employeeName: `${SYSTEM_TEST_PREFIX}other_employee`,
+          customerName: null,
+          branchName: "\u0627\u062E\u062A\u0628\u0627\u0631",
+          invoiceNumber: 0,
+          tierKey: "retail",
+          items: [{ productName: `${SYSTEM_TEST_PREFIX}item`, unitPrice: 7, qty: 1, lineTotal: 7 }],
+          total: 7,
+          paid: true,
+          fulfillment: "pickup",
+          paymentMethod: "cash",
+          splitTransferMethod: null,
+          cashAmount: null,
+          transferAmount: null,
+          createdAt: SYS_OLD_TS
+        },
+        extra || {},
+        { id }
+      );
+    }
+  };
+  return c;
+}
+const SYS_PART1_CHECKS = [
+  {
+    id: "P1-01",
+    title: "\u062D\u0641\u0638 \u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u0627\u0633\u0645 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A (H1/H2 \u2014 \u0645\u0633\u0645\u0648\u062D \u0628\u0627\u0644\u062A\u0635\u0645\u064A\u0645)",
+    run: async (c) => {
+      const s = c.sale("c1");
+      const r = await salesStore._attempt("upsert", s);
+      c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.shared.sale = s;
+      c.check("P1-01", "\u062D\u0641\u0638 \u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u0633\u062A\u0644\u0627\u0645 (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631)", "ok", r);
+    }
+  },
+  {
+    id: "P1-02",
+    title: "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629: \u0643\u0644 \u0627\u0644\u062D\u0642\u0648\u0644 \u0632\u064A \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A (E6)",
+    run: async (c) => {
+      const s = c.shared.sale;
+      if (!s) return c.skip("P1-02", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", "\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634 \u0641\u064A \u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647");
+      const g = await c.getDoc("sales_col", s.id);
+      const d = g.data || {};
+      const same = g.status === 200 && d.id === s.id && d.total === 7 && d.employeeName === s.employeeName && d.paymentMethod === "cash" && d.fulfillment === "pickup" && d.paid === true && d.branchName === "\u0627\u062E\u062A\u0628\u0627\u0631" && d.createdAt === SYS_OLD_TS && Array.isArray(d.items) && d.items.length === 1 && d.items[0].lineTotal === 7 && d.items[0].qty === 1;
+      c.check("P1-02", "\u0627\u0644\u062D\u0642\u0648\u0644 \u0627\u0644\u0645\u062D\u0641\u0648\u0638\u0629 \u0645\u0637\u0627\u0628\u0642\u0629", true, same, `HTTP ${g.status}`);
+    }
+  },
+  {
+    id: "P1-03",
+    title: "\u0643\u0644 \u0637\u0631\u0642 \u0627\u0644\u062F\u0641\u0639 \u0628\u062A\u062A\u062E\u0632\u0646 \u0635\u062D\u060C \u0648\u0627\u0644\u062F\u0641\u0639 \u0627\u0644\u0645\u0642\u0633\u0651\u0645 (E1/E2)",
+    run: async (c) => {
+      const variants = [
+        ["cash", {}],
+        ["vodafone_cash", {}],
+        ["instapay", {}],
+        ["split", { splitTransferMethod: "instapay", cashAmount: 3, transferAmount: 4 }]
+      ];
+      const saved = [];
+      const back = [];
+      for (const [pm, extra] of variants) {
+        const s = c.sale("pm_" + pm, Object.assign({ paymentMethod: pm }, extra));
+        saved.push(await salesStore._attempt("upsert", s));
+        c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+        const g = await c.getDoc("sales_col", s.id);
+        const d = g.data || {};
+        back.push(d.paymentMethod === pm && (pm !== "split" || d.splitTransferMethod === "instapay" && d.cashAmount === 3 && d.transferAmount === 4 && d.cashAmount + d.transferAmount === d.total));
+      }
+      c.check("P1-03", "\u0627\u0644\u062D\u0641\u0638 \u062B\u0645 \u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0644\u0643\u0644 \u0637\u0631\u064A\u0642\u0629 \u062F\u0641\u0639", { saved: ["ok", "ok", "ok", "ok"], back: [true, true, true, true] }, { saved, back });
+    }
+  },
+  {
+    id: "P1-04",
+    title: "\u062A\u0639\u062F\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0645\u0631\u0641\u0648\u0636 \u0644\u0623\u064A \u062D\u062F \u062D\u062A\u0649 \u0627\u0644\u0623\u062F\u0645\u0646 (H3)",
+    run: async (c) => {
+      const s = c.shared.sale;
+      if (!s) return c.skip("P1-04", "\u062A\u0639\u062F\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u0629", "\u0645\u0641\u064A\u0634 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629");
+      const r = await salesStore._attempt("upsert", Object.assign({}, s, { total: 8 }));
+      const g = await c.getDoc("sales_col", s.id);
+      c.check("P1-04", "\u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A", { result: "drop", total: 7 }, { result: r, total: g.data ? g.data.total : null });
+    }
+  },
+  {
+    id: "P1-05",
+    title: "\u062D\u0630\u0641 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0631\u0641\u0648\u0636 \u0644\u0623\u064A \u062D\u062F \u062D\u062A\u0649 \u0627\u0644\u0623\u062F\u0645\u0646 (H3)",
+    run: async (c) => {
+      const s = c.shared.sale;
+      if (!s) return c.skip("P1-05", "\u062D\u0630\u0641 \u0641\u0627\u062A\u0648\u0631\u0629", "\u0645\u0641\u064A\u0634 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629");
+      const r = await salesStore._attempt("remove", s.id);
+      const g = await c.getDoc("sales_col", s.id);
+      c.check("P1-05", "\u0645\u062D\u0627\u0648\u0644\u0629 \u0627\u0644\u0645\u0633\u062D", { result: "drop", stillThere: true }, { result: r, stillThere: g.status === 200 });
+    }
+  },
+  {
+    id: "P1-06",
+    title: "\u0634\u0643\u0644 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629: \u0627\u0644\u0645\u0648\u0638\u0641 \u0628\u064A\u062A\u0631\u0641\u0636 \u0644\u0647 \u0627\u0644\u063A\u0644\u0637\u060C \u0648\u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0639\u062F\u0651\u064A (\u0627\u0644\u0642\u0627\u0639\u062F\u0629 isAdmin() ||)",
+    run: async (c) => {
+      const isAdmin = c.role === "admin";
+      const cases = [
+        ["\u0627\u0633\u062A\u0644\u0627\u0645 \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639", "bad_unpaid", { paid: false }, false],
+        ["\u0625\u062C\u0645\u0627\u0644\u064A \u0628\u0627\u0644\u0633\u0627\u0644\u0628", "bad_neg", { total: -5 }, false],
+        ["\u062A\u0648\u0635\u064A\u0644 \u0645\u062F\u0641\u0648\u0639 \u0645\u0646 \u0627\u0644\u0628\u062F\u0627\u064A\u0629", "bad_deliv_paid", { fulfillment: "delivery", paid: true, deliveryStatus: "prepared" }, false],
+        ["\u062A\u0648\u0635\u064A\u0644 \u062D\u0627\u0644\u062A\u0647 \u0645\u0634 \xAB\u0627\u062A\u062C\u0647\u0632\xBB", "bad_deliv_sent", { fulfillment: "delivery", paid: false, deliveryStatus: "sent" }, false],
+        ["\u0627\u0644\u0623\u0635\u0646\u0627\u0641 \u0645\u0634 \u0642\u0627\u064A\u0645\u0629", "bad_items", { items: "x" }, true],
+        ["id \u062C\u0648\u0647 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062E\u062A\u0644\u0641 \u0639\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u0646\u062F", "bad_id", {}, true]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, tag, extra, malformed] of cases) {
+        if (isAdmin && malformed) {
+          c.note(`\u0627\u0644\u0623\u062F\u0645\u0646: \u0627\u062A\u062E\u0637\u064A\u062A \xAB${label}\xBB (\u0643\u0627\u0646 \u0647\u064A\u0633\u064A\u0628 \u0633\u062C\u0644 \u0645\u0634\u0648\u0651\u0647 \u062F\u0627\u064A\u0645)`);
+          continue;
+        }
+        let doc = c.sale(tag, extra);
+        let pathId = doc.id;
+        if (tag === "bad_id") doc = Object.assign({}, doc, { id: `${doc.id}_other` });
+        const r = await c.putDoc("sales_col", pathId, doc);
+        actual.push([label, r.ok]);
+        expected.push([label, isAdmin]);
+        if (r.ok) c.leftover(`sales_col/${pathId}`, `\u0633\u062C\u0644 \u062A\u062C\u0631\u064A\u0628\u064A \u063A\u0644\u0637 \u0627\u0644\u0634\u0643\u0644 (${label}) \u2014 \u0627\u062A\u0642\u0628\u0644 \u0644\u0623\u0646 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u062A\u062E\u0637\u0649 \u0641\u062D\u0635 \u0627\u0644\u0634\u0643\u0644`);
+        if (!isAdmin) {
+          const g = await c.getDoc("sales_col", pathId);
+          actual[actual.length - 1].push(g.status);
+          expected[expected.length - 1].push(404);
+        }
+      }
+      c.check("P1-06", isAdmin ? "\u0627\u0644\u0623\u062F\u0645\u0646: \u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0627\u062A\u0642\u0628\u0644\u062A (\u0645\u062A\u0648\u0642\u0639 \u0645\u0646 \u0627\u0644\u0642\u0648\u0627\u0639\u062F)" : "\u0627\u0644\u0645\u0648\u0638\u0641: \u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0627\u062A\u0631\u0641\u0636\u062A \u0648\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F \u0627\u062A\u0639\u0645\u0644", expected, actual);
+    }
+  },
+  {
+    id: "P1-07",
+    title: "\u0627\u0644\u0631\u0641\u0636 \u0627\u0644\u062F\u0627\u064A\u0645 \u0645\u0634 \u0628\u064A\u062A\u062D\u0637 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 (F3)",
+    run: async (c) => {
+      if (c.role === "admin") return c.skip("P1-07", "\u062A\u0635\u0646\u064A\u0641 \u0627\u0644\u0631\u0641\u0636", "\u0627\u0644\u0623\u062F\u0645\u0646 \u0645\u0634 \u0628\u064A\u062A\u0631\u0641\u0636 \u0644\u0647 \u0634\u0643\u0644 \u0641\u0627\u062A\u0648\u0631\u0629\u060C \u0641\u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 \u0628\u0633");
+      const before = getOfflineQueue().length;
+      const r = await salesStore._attempt("upsert", c.sale("bad_class", { paid: false }));
+      const after = getOfflineQueue().length;
+      c.check("P1-07", "\u0631\u0641\u0636 \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 = \xABdrop\xBB \u0648\u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0632\u064A \u0645\u0627 \u0647\u0648", { result: "drop", queueGrew: false }, { result: r, queueGrew: after > before });
+    }
+  },
+  {
+    id: "P1-08",
+    title: "\u0627\u0644\u062A\u062C\u0645\u064A\u0639 \u0627\u0644\u0634\u0647\u0631\u064A: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0628\u062A\u062A\u062D\u0633\u0628 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 (E9)",
+    run: async (c) => {
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const testDay = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}`;
+      const invId = `${SYSTEM_TEST_PREFIX}${c.runId}_agg`;
+      const first = await attemptInvoiceAggregateWrite(testDay, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", invId, 7);
+      const second = await attemptInvoiceAggregateWrite(testDay, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", invId, 7);
+      c.leftover(`invoice_aggregate_writes_col/${invId}`, "\u0639\u0644\u0627\u0645\u0629 \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.check("P1-08a", "\u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0623\u0648\u0644 \u062B\u0645 \u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", { first: "ok", second: "drop" }, { first, second });
+      if (c.role === "admin") {
+        const g = await c.getDoc("monthly_aggregates_col", monthId);
+        const days = g.data && g.data.days || {};
+        const node = days[testDay] && days[testDay]["\u0627\u062E\u062A\u0628\u0627\u0631"] && days[testDay]["\u0627\u062E\u062A\u0628\u0627\u0631"].sales;
+        c.check("P1-08b", "\u0627\u0644\u0642\u064A\u0645\u0629 \u0641\u064A \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631 = \u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629", 7, node ? node[invId] : null, `HTTP ${g.status}`);
+      } else {
+        c.skip("P1-08b", "\u0642\u0631\u0627\u0621\u0629 \u0642\u064A\u0645\u0629 \u0627\u0644\u0634\u0647\u0631", "\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0645\u0634 \u0645\u0633\u0645\u0648\u062D \u0644\u0647 \u064A\u0642\u0631\u0627 \u0627\u0644\u062A\u062C\u0645\u064A\u0639\u0627\u062A (\u0645\u062A\u0648\u0642\u0639) \u2014 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0641\u062D\u0635\u0647\u0627");
+      }
+      if (first === "ok") {
+        const mdName = `${FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "")}/monthly_aggregates_col/${monthId}`;
+        const t = await c.http("POST", `${FIRESTORE_BASE}:commit`, {
+          writes: [{ update: { name: mdName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
+        });
+        c.note(`${t.ok ? "\u{1F9F9} \u0627\u062A\u0645\u0633\u062D \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0645\u0646 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631" : "\u26A0\uFE0F \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0644\u0633\u0647 \u0641\u064A monthly_aggregates_col/" + monthId + " \u2190 days \u2190 " + testDay}`);
+        if (!t.ok) c.leftover(`monthly_aggregates_col/${monthId} (days.${testDay})`, "\u0627\u0645\u0633\u062D\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console");
+      }
+    }
+  },
+  {
+    id: "P1-09",
+    title: "\u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631: \u0631\u0642\u0645\u064A\u0646 \u0641\u064A \u0646\u0641\u0633 \u0627\u0644\u0644\u062D\u0638\u0629 \u0645\u0627\u064A\u062A\u0643\u0631\u0631\u0634 (D1/D2)",
+    run: async (c) => {
+      const fb = Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS);
+      const [x, y] = await Promise.all([claimNextInvoiceNumber(fb), claimNextInvoiceNumber(fb)]);
+      const after = await c.getDoc("settings_col", "invoice_number_settings");
+      c.check("P1-09a", "\u0631\u0642\u0645\u064A\u0646 \u0627\u062A\u062D\u062C\u0632\u0648\u0627 \u0645\u0639 \u0628\u0639\u0636", true, x.number !== y.number, `\u0627\u0644\u0623\u0631\u0642\u0627\u0645: ${x.number} \u0648 ${y.number}`);
+      c.check("P1-09b", "\u0627\u0644\u0639\u062F\u0627\u062F \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 = \u0623\u0643\u0628\u0631 \u0631\u0642\u0645 + 1", Math.max(x.number, y.number) + 1, after.data ? after.data.nextNumber : null, `HTTP ${after.status}`);
+      c.leftover("settings_col/invoice_number_settings", "\u0627\u0644\u0639\u062F\u0627\u062F \u0632\u0627\u062F \u0628\u0645\u0642\u062F\u0627\u0631 2 (\u0631\u0642\u0645\u064A\u0646 \u0627\u062A\u062D\u0631\u0642\u0648\u0627)");
+    }
+  }
+];
+const SYS_PARTS = [
+  { id: "S1", title: "\u0627\u0644\u062E\u0637\u0648\u0629 1 \u2014 \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 (\u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0642\u062F\u064A\u0645)", legacy: true },
+  { id: "P1", title: "\u0627\u0644\u062C\u0632\u0621 1 \u2014 \u0627\u0644\u0628\u064A\u0639 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", checks: SYS_PART1_CHECKS }
+];
+async function sysRunPart(part, acct, runId, log, sink) {
+  log(`
+\u2501\u2501 ${part.title} \u2501\u2501`);
+  if (part.legacy) {
+    const out = await runSystemTestStep1(acct.step1Role, log);
+    (out.results || []).forEach((r) => sink.results.push({ id: r.id, title: r.title, expected: r.expectedOk, actual: r.actualOk, match: r.match }));
+    return;
+  }
+  const token = await ensureAuth();
+  const c = sysMakeContext(acct, runId, log, sink, token);
+  for (const chk of part.checks) {
+    try {
+      await chk.run(c);
+    } catch (e) {
+      sink.results.push({ id: chk.id, title: chk.title, match: false, error: String(e && e.message || e) });
+      log(`\u{1F4A5} ${chk.id} ${chk.title}
+    \u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639: ${e && e.message || e}`);
+    }
+  }
+}
+function sysSummary(sink) {
+  const ok = sink.results.filter((r) => r.match === true).length;
+  const bad = sink.results.filter((r) => r.match === false).length;
+  const skipped = sink.results.filter((r) => r.skipped).length;
+  return { ok, bad, skipped };
+}
+(function mountSystemTestOverlay() {
+  try {
+    const btn = document.createElement("button");
+    btn.id = "sys-test-open";
+    btn.textContent = "\u{1F9EA}";
+    btn.setAttribute(
+      "style",
+      "position:fixed;left:10px;bottom:calc(90px + env(safe-area-inset-bottom, 0px));z-index:2147483646;width:44px;height:44px;border-radius:22px;border:0;background:#111827;color:#fff;font-size:20px;opacity:.85;"
+    );
+    document.body.appendChild(btn);
+    const panel = document.createElement("div");
+    panel.id = "sys-test-panel";
+    panel.setAttribute(
+      "style",
+      "display:none;position:fixed;inset:0;z-index:2147483647;background:#F9FAFB;color:#111827;overflow:auto;direction:rtl;padding:calc(28px + env(safe-area-inset-top, 0px)) 14px 24px;font:14px/1.6 system-ui,sans-serif;"
+    );
+    const bs = "padding:10px 14px;border:0;border-radius:8px;color:#fff;font-size:14px;margin:3px 0;";
+    panel.innerHTML = '<div style="font-weight:700;font-size:16px">\u{1F9EA} \u0641\u062D\u0648\u0635\u0627\u062A \u062D\u064A\u0629</div><div style="margin:8px 0;padding:8px;border-radius:8px;background:#FEF3C7;color:#78350F">\u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0628\u062A\u0643\u062A\u0628 \u0628\u064A\u0627\u0646\u0627\u062A \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0639\u0644\u0649 Firebase \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A (\u0643\u0644\u0647\u0627 \u0628\u0648\u0633\u0645 ' + SYSTEM_TEST_PREFIX + '). \u0645\u0645\u0643\u0646 \u062A\u0638\u0647\u0631 \u0631\u0633\u0627\u064A\u0644 \u062E\u0637\u0623 \u062D\u0645\u0631\u0627 \u0641\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0648\u0642\u062A \u0627\u0644\u0641\u062D\u0635 \u2014 \u0639\u0627\u062F\u064A. \u0634\u063A\u0651\u0644 \u0646\u0641\u0633 \u0627\u0644\u062C\u0632\u0621 \u0645\u0631\u0629 \u0628\u062D\u0633\u0627\u0628 \u0627\u0644\u0623\u062F\u0645\u0646 \u0648\u0645\u0631\u0629 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641.</div><div id="sys-test-acct" style="margin:6px 0;font-weight:700"></div><div id="sys-test-parts"></div><button id="sys-test-all" style="' + bs + 'background:#2563EB">\u0634\u063A\u0651\u0644 \u0643\u0644 \u0627\u0644\u0623\u062C\u0632\u0627\u0621</button> <button id="sys-test-copy" style="' + bs + 'background:#374151">\u0646\u0633\u062E \u0627\u0644\u062A\u0642\u0631\u064A\u0631</button> <button id="sys-test-close" style="' + bs + 'background:#6B7280">\u0625\u063A\u0644\u0627\u0642</button><pre id="sys-test-log" style="white-space:pre-wrap;word-break:break-word;margin-top:12px;font:12px/1.7 ui-monospace,monospace;direction:rtl;text-align:right"></pre>';
+    document.body.appendChild(panel);
+    const logEl = panel.querySelector("#sys-test-log");
+    const acctEl = panel.querySelector("#sys-test-acct");
+    const partsEl = panel.querySelector("#sys-test-parts");
+    const allBtn = panel.querySelector("#sys-test-all");
+    let acct = null;
+    let busy = false;
+    let lastReport = null;
+    const log = (line) => {
+      logEl.textContent += line + "\n";
+    };
+    const setBusy = (v) => {
+      busy = v;
+      panel.querySelectorAll("button[data-part], #sys-test-all").forEach((b) => {
+        b.disabled = v;
+      });
+    };
+    partsEl.innerHTML = SYS_PARTS.map((p) => `<button data-part="${p.id}" style="${bs}background:#0F766E;display:block;width:100%;text-align:right">\u25B6 ${p.title}</button>`).join("");
+    const refreshAccount = async () => {
+      acctEl.textContent = "\u0628\u0642\u0631\u0627 \u0627\u0644\u062D\u0633\u0627\u0628...";
+      acct = await sysDetectAccount();
+      acctEl.textContent = `\u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u062D\u0627\u0644\u064A: ${acct.label}`;
+    };
+    const runParts = async (partIds) => {
+      if (busy) return;
+      setBusy(true);
+      logEl.textContent = "";
+      try {
+        await refreshAccount();
+        log(`\u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${FIREBASE_PROJECT_ID}`);
+        if (FIREBASE_PROJECT_ID !== SYSTEM_TEST_EXPECTED_PROJECT) {
+          log("\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.");
+          return;
+        }
+        if (!acct.ok || acct.role === "pending" || acct.role === "unknown") {
+          log("\u26D4 \u0627\u0644\u062D\u0633\u0627\u0628 \u062F\u0647 \u0645\u0634 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 (\u0623\u0648 \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0642\u0631\u0627\u0647). \u0627\u062F\u062E\u0644 \u0628\u062D\u0633\u0627\u0628 \u0623\u062F\u0645\u0646 \u0623\u0648 \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647.");
+          return;
+        }
+        const runId = Date.now().toString(36);
+        const sink = { results: [], leftovers: [] };
+        log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${acct.email} \u2014 \u0627\u0644\u0646\u0648\u0639: ${acct.role === "admin" ? "\u0623\u062F\u0645\u0646" : "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A"} \u2014 \u0631\u0642\u0645 \u0627\u0644\u062A\u0634\u063A\u064A\u0644\u0629: ${runId}`);
+        for (const id of partIds) {
+          await sysRunPart(SYS_PARTS.find((p) => p.id === id), acct, runId, log, sink);
+        }
+        const s = sysSummary(sink);
+        log("");
+        log("\u2014 \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0627\u0636\u0644\u0629 (\u0645\u0634 \u0628\u062A\u062A\u0645\u0633\u062D \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642) \u2014");
+        if (sink.leftovers.length === 0) log("\u0645\u0641\u064A\u0634.");
+        else sink.leftovers.forEach((l) => log("\u2022 " + l));
+        log("");
+        log(`\u0627\u0644\u0646\u062A\u064A\u062C\u0629: \u2705 ${s.ok} \u0645\u0637\u0627\u0628\u0642 | \u274C ${s.bad} \u0645\u062E\u0627\u0644\u0641 | \u23ED\uFE0F ${s.skipped} \u0645\u062A\u062E\u0637\u064A`);
+        lastReport = { app: "FaAroon live-check", schema: 1, when: (/* @__PURE__ */ new Date()).toISOString(), project: FIREBASE_PROJECT_ID, runId, account: { email: acct.email, role: acct.role }, parts: partIds, summary: s, results: sink.results, leftovers: sink.leftovers };
+      } catch (e) {
+        log(`\u26D4 \u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639: ${e && e.message ? e.message : e}`);
+      } finally {
+        setBusy(false);
+      }
+    };
+    btn.onclick = async () => {
+      panel.style.display = "block";
+      if (!busy) await refreshAccount();
+    };
+    panel.querySelector("#sys-test-close").onclick = () => {
+      panel.style.display = "none";
+    };
+    partsEl.onclick = (e) => {
+      const id = e.target && e.target.getAttribute && e.target.getAttribute("data-part");
+      if (id) runParts([id]);
+    };
+    allBtn.onclick = () => runParts(SYS_PARTS.map((p) => p.id));
+    panel.querySelector("#sys-test-copy").onclick = async () => {
+      const text = logEl.textContent + (lastReport ? "\n\n--- JSON ---\n" + JSON.stringify(lastReport) : "");
+      try {
+        await navigator.clipboard.writeText(text);
+        log("\u{1F4CB} \u0627\u062A\u0646\u0633\u062E \u0627\u0644\u062A\u0642\u0631\u064A\u0631");
+      } catch (e) {
+        log("\u062A\u0639\u0630\u0631 \u0627\u0644\u0646\u0633\u062E \u062A\u0644\u0642\u0627\u0626\u064A\u060C \u0627\u0636\u063A\u0637 \u0645\u0637\u0648\u0644\u064B\u0627 \u0639\u0644\u0649 \u0627\u0644\u0646\u0635 \u0648\u0627\u0646\u0633\u062E\u0647.");
+      }
+    };
+  } catch (e) {
+  }
+})();
 const rootEl = document.getElementById("root");
 ReactDOM.createRoot(rootEl).render(/* @__PURE__ */ React.createElement(App, null));
