@@ -6039,7 +6039,7 @@ async function sysDetectAccount() {
   try {
     const token = await ensureAuth();
     const claims = decodeIdTokenClaims(token) || {};
-    const uid2 = claims.user_id || claims.sub || null;
+    const uid2 = claims.uid || null;
     const email = claims.email || "";
     const me = uid2 ? await fetchUserDocById(uid2) : null;
     if (me === void 0) return { ok: false, role: "offline", email, label: "\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u2014 \u0645\u0642\u062F\u0631\u062A\u0634 \u0623\u0639\u0631\u0641 \u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628" };
