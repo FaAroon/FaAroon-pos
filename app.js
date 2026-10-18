@@ -5952,7 +5952,7 @@ async function runSystemTestStep1(role, log) {
   let who = "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641";
   try {
     const claims = decodeIdTokenClaims(token) || {};
-    who = `${claims.email || "\u0628\u062F\u0648\u0646 \u0625\u064A\u0645\u064A\u0644"} - verified: ${claims.email_verified === true ? "\u0646\u0639\u0645" : "\u0644\u0627"}`;
+    who = `${claims.email || "\u0628\u062F\u0648\u0646 \u0625\u064A\u0645\u064A\u0644"} - verified: ${claims.emailVerified === true ? "\u0646\u0639\u0645" : "\u0644\u0627"}`;
   } catch (e) {
     who = "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628";
   }
@@ -6046,8 +6046,8 @@ async function sysDetectAccount() {
     if (!me) return { ok: true, role: "unknown", email, name: "", step1Role: "pending", label: `${email} \u2014 \u0645\u0641\u064A\u0634 \u0633\u062C\u0644 \u062D\u0633\u0627\u0628` };
     const role = me.status !== "approved" ? "pending" : me.role === "admin" ? "admin" : "employee";
     const step1Role = role === "admin" ? "admin" : role === "pending" ? "pending" : me.permissions && me.permissions.viewReports ? "viewReports" : "cashier";
-    const roleLabel = role === "admin" ? "\u0623\u062F\u0645\u0646" : role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : "\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647";
-    return { ok: true, role, step1Role, uid: uid2, email, name: me.name || "", label: `${me.name || email} \u2014 ${roleLabel}` };
+    const roleLabel = role === "admin" ? "\u0623\u062F\u0645\u0646" : role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : `\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 (${me.status || "?"})`;
+    return { ok: true, role, step1Role, uid: uid2, email, name: me.name || "", status: me.status, label: `${me.name || email} \u2014 ${roleLabel}` };
   } catch (e) {
     return { ok: false, role: "error", email: "", label: "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628" };
   }
@@ -6055,6 +6055,7 @@ async function sysDetectAccount() {
 function sysMakeContext(acct, runId, log, sink, token) {
   const c = {
     role: acct.role,
+    unapproved: acct.role === "pending" || acct.role === "unknown",
     runId,
     shared: {},
     http: async (method, url, body) => {
@@ -6267,9 +6268,146 @@ const SYS_PART1_CHECKS = [
     }
   }
 ];
+async function sysCleanupAggDay(c, monthId, testDay) {
+  const mdName = `${FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "")}/monthly_aggregates_col/${monthId}`;
+  const t = await c.http("POST", `${FIRESTORE_BASE}:commit`, {
+    writes: [{ update: { name: mdName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
+  });
+  c.note(t.ok ? "\u{1F9F9} \u0627\u062A\u0645\u0633\u062D \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0645\u0646 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631" : `\u26A0\uFE0F \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0644\u0633\u0647 \u0641\u064A \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631 \u2190 days \u2190 ${testDay}`);
+  if (!t.ok) c.leftover(`monthly_aggregates_col/${monthId} (days.${testDay})`, "\u0627\u0645\u0633\u062D\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console");
+}
+const SYS_PART2_CHECKS = [
+  {
+    id: "P2-01",
+    title: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\xAB\u0641\u0648\u0627\u062A\u064A\u0631\u064A\xBB: \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0628\u0627\u0644\u0645\u062F\u0649 \u0627\u0644\u0632\u0645\u0646\u064A \u0628\u064A\u0631\u062C\u0651\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 (E10)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-01", "\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0628\u0627\u0644\u062A\u0627\u0631\u064A\u062E", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const s = c.sale("q1");
+      const saved = await salesStore._attempt("upsert", s);
+      c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const rows = await fetchSalesInRange(SYS_OLD_TS - 1e3, SYS_OLD_TS + 1e3);
+      const mine = Array.isArray(rows) ? rows.find((r) => r.id === s.id) : null;
+      c.check("P2-01", "\u062D\u0641\u0638 \u062B\u0645 \u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0628\u0627\u0644\u0645\u062F\u0649 (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0641\u0648\u0627\u062A\u064A\u0631\u064A)", { saved: "ok", found: true, total: 7 }, { saved, found: !!mine, total: mine ? mine.total : null }, rows === null ? "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644 (null) \u2014 \u0645\u0645\u0643\u0646 \u064A\u062D\u062A\u0627\u062C index" : `\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0631\u062C\u0651\u0639 ${rows.length} \u0641\u0627\u062A\u0648\u0631\u0629 \u0641\u064A \u0627\u0644\u0645\u062F\u0649`);
+      if (mine && c.role === "employee") c.note("\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0642\u0631\u0627 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0639\u0646 \u0637\u0631\u064A\u0642 \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 \u064A\u0642\u0631\u0627 \u0643\u0644 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u2014 \u0634\u0648\u0641 \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A)");
+    }
+  },
+  {
+    id: "P2-02",
+    title: "\u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0645\u0634 \u0628\u062A\u0638\u0647\u0631 \u0641\u064A \u0623\u064A \u062A\u0642\u0631\u064A\u0631 \u062D\u0642\u064A\u0642\u064A (\u062D\u0645\u0627\u064A\u0629 \u0645\u0646 \u0627\u0644\u062A\u0644\u0648\u062B)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-02", "\u062D\u0645\u0627\u064A\u0629 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const rows = await fetchSalesInRange(Date.now() - 35 * 24 * 60 * 60 * 1e3, Date.now());
+      const leaked = Array.isArray(rows) ? rows.filter((r) => String(r.id || "").startsWith(SYSTEM_TEST_PREFIX)).length : null;
+      c.check("P2-02", "\u0639\u062F\u062F \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u064A \u0622\u062E\u0631 35 \u064A\u0648\u0645", 0, leaked, Array.isArray(rows) ? `\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0631\u062C\u0651\u0639 ${rows.length} \u0641\u0627\u062A\u0648\u0631\u0629 \u062D\u0642\u064A\u0642\u064A\u0629 \u0641\u064A \u0627\u0644\u0645\u062F\u0649` : "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644");
+    }
+  },
+  {
+    id: "P2-03",
+    title: "\u062D\u062F \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0627\u0644\u0633\u0627\u0639\u0629 3 \u0627\u0644\u0641\u062C\u0631 (E15)",
+    run: async (c) => {
+      const L = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0).getTime();
+      const cases = [
+        ["2:59 \u2192 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647", L(2026, 10, 18, 2, 59), "2026-10-17"],
+        ["3:00 \u2192 \u0646\u0641\u0633 \u0627\u0644\u064A\u0648\u0645", L(2026, 10, 18, 3, 0), "2026-10-18"],
+        ["12:00 \u0645\u0646\u062A\u0635\u0641 \u0627\u0644\u0644\u064A\u0644 \u2192 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647", L(2026, 10, 18, 0, 0), "2026-10-17"],
+        ["23:59 \u2192 \u0646\u0641\u0633 \u0627\u0644\u064A\u0648\u0645", L(2026, 10, 18, 23, 59), "2026-10-18"],
+        ["\u0623\u0648\u0644 \u0627\u0644\u0634\u0647\u0631 2:59", L(2026, 11, 1, 2, 59), "2026-10-31"],
+        ["\u0623\u0648\u0644 \u0627\u0644\u0633\u0646\u0629 2:59", L(2027, 1, 1, 2, 59), "2026-12-31"],
+        ["\u0623\u0648\u0644 \u0645\u0627\u0631\u0633 2:59 (\u0633\u0646\u0629 \u0643\u0628\u064A\u0633\u0629)", L(2028, 3, 1, 2, 59), "2028-02-29"],
+        ["\u0623\u0648\u0644 \u0645\u0627\u0631\u0633 2:59 (\u0633\u0646\u0629 \u0639\u0627\u062F\u064A\u0629)", L(2027, 3, 1, 2, 59), "2027-02-28"]
+      ];
+      c.note(`\u0641\u0631\u0642 \u0627\u0644\u062A\u0648\u0642\u064A\u062A \u0639\u0644\u0649 \u0627\u0644\u062C\u0647\u0627\u0632: ${-(/* @__PURE__ */ new Date()).getTimezoneOffset() / 60} \u0633\u0627\u0639\u0629 \u0639\u0646 \u062C\u0631\u064A\u0646\u062A\u0634 (\u0627\u0644\u062D\u0633\u0627\u0628 \u0628\u064A\u0639\u062A\u0645\u062F \u0639\u0644\u0649 \u0633\u0627\u0639\u0629 \u0648\u062A\u0648\u0642\u064A\u062A \u0627\u0644\u062C\u0647\u0627\u0632)`);
+      c.check("P2-03", "\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0644\u0643\u0644 \u062A\u0648\u0642\u064A\u062A", cases.map((x) => [x[0], x[2]]), cases.map((x) => [x[0], businessDayOf(x[1])]));
+    }
+  },
+  {
+    id: "P2-04",
+    title: "\u0645\u062F\u0649 \xAB\u0627\u0644\u0646\u0647\u0627\u0631\u062F\u0647\xBB \u0645\u062A\u0648\u0627\u0641\u0642 \u0645\u0639 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A (E15)",
+    run: async (c) => {
+      const r = businessDayRange(0);
+      const checks = {
+        startEndSameDay: businessDayOf(r.start) === businessDayOf(r.end),
+        justBeforeIsPreviousDay: businessDayOf(r.start - 1) !== businessDayOf(r.start),
+        justAfterIsNextDay: businessDayOf(r.end + 1) !== businessDayOf(r.end),
+        startIs3am: new Date(r.start).getHours() === 3
+      };
+      c.check("P2-04", "\u0628\u062F\u0627\u064A\u0629 \u0648\u0646\u0647\u0627\u064A\u0629 \u0645\u062F\u0649 \u0627\u0644\u064A\u0648\u0645", { startEndSameDay: true, justBeforeIsPreviousDay: true, justAfterIsNextDay: true, startIs3am: true }, checks);
+    }
+  },
+  {
+    id: "P2-05",
+    title: "\u062A\u0635\u0641\u064A\u0631 \u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631: \u0623\u0628\u062F\u064B\u0627 / \u064A\u0648\u0645\u064A\u064B\u0627 / \u0634\u0647\u0631\u064A\u064B\u0627 (D3)",
+    run: async (c) => {
+      const today = currentResetKey("daily");
+      const month = currentResetKey("monthly");
+      const take = (freq, last) => {
+        const r = takeNextInvoiceNumber({ nextNumber: 5, resetFrequency: freq, lastResetKey: last });
+        return [r.number, r.updatedSettings.nextNumber, r.updatedSettings.lastResetKey];
+      };
+      c.note(`\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u064A\u0648\u0645\u064A \u0628\u064A\u062A\u062D\u0633\u0628 \u0628\u062A\u0648\u0642\u064A\u062A \u062C\u0631\u064A\u0646\u062A\u0634: ${today} \u2014 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u062F\u0644\u0648\u0642\u062A\u064A: ${businessDayOf(Date.now())}`);
+      c.check(
+        "P2-05",
+        "\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0628\u0639\u062F \u0643\u0644 \u0646\u0648\u0639 \u062A\u0635\u0641\u064A\u0631",
+        { never_old: [5, 6, null], daily_same: [5, 6, today], daily_old: [1, 2, today], monthly_same: [5, 6, month], monthly_old: [1, 2, month] },
+        { never_old: take("never", "2000-01-01"), daily_same: take("daily", today), daily_old: take("daily", "2000-01-01"), monthly_same: take("monthly", month), monthly_old: take("monthly", "2000-01") }
+      );
+    }
+  },
+  {
+    id: "P2-06",
+    title: "\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0641\u0631\u0639 \u0628\u062A\u062A\u062C\u0645\u0651\u0639 \u062A\u062D\u062A \xAB\u0628\u062F\u0648\u0646 \u0641\u0631\u0639\xBB (E16)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-06", "\u062A\u062C\u0645\u064A\u0639 \u0628\u062F\u0648\u0646 \u0641\u0631\u0639", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_nb`;
+      const ida = `${SYSTEM_TEST_PREFIX}${c.runId}_nb1`;
+      const idb = `${SYSTEM_TEST_PREFIX}${c.runId}_nb2`;
+      const ra = await attemptInvoiceAggregateWrite(day, "", "sales", ida, 7);
+      const rb = await attemptInvoiceAggregateWrite(day, null, "sales", idb, 7);
+      c.leftover(`invoice_aggregate_writes_col/${ida} \u0648 ${idb}`, "\u0639\u0644\u0627\u0645\u0627\u062A \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.check("P2-06a", "\u062A\u0633\u062C\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u062A\u064A\u0646: \u0641\u0631\u0639 \u0641\u0627\u0636\u064A \u0648\u0641\u0631\u0639 null", ["ok", "ok"], [ra, rb]);
+      if (c.role === "admin") {
+        const g = await c.getDoc("monthly_aggregates_col", monthId);
+        const dayNode = g.data && g.data.days && g.data.days[day] || {};
+        const node = dayNode["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"] && dayNode["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"].sales;
+        c.check("P2-06b", "\u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0644\u064A \u0627\u062A\u0633\u062C\u0644 \u062A\u062D\u062A\u0647 \u0648\u0627\u0644\u0645\u0628\u0627\u0644\u063A", { branches: ["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"], a: 7, b: 7 }, { branches: Object.keys(dayNode), a: node ? node[ida] : null, b: node ? node[idb] : null }, `HTTP ${g.status}`);
+      } else {
+        c.skip("P2-06b", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0645\u0633\u062C\u0651\u0644", "\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0645\u0634 \u0645\u0633\u0645\u0648\u062D \u0644\u0647 \u064A\u0642\u0631\u0627 \u0627\u0644\u062A\u062C\u0645\u064A\u0639\u0627\u062A \u2014 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0641\u062D\u0635\u0647\u0627");
+      }
+      if (ra === "ok" || rb === "ok") await sysCleanupAggDay(c, monthId, day);
+    }
+  },
+  {
+    id: "P2-07",
+    title: "\u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0634\u0631\u0627\u064A\u062D \u0648\u0627\u0644\u0641\u0631\u0648\u0639 \u0645\u0642\u0631\u0648\u0621\u0629 \u0644\u0644\u0643\u0627\u0634\u064A\u0631 (\u0645\u0634 \u0645\u0645\u0646\u0648\u0639\u0629)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-07", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const t = await c.getDoc("settings_col", "tier_settings");
+      const b = await c.getDoc("settings_col", "branch_settings");
+      c.check("P2-07", "\u0627\u0644\u062D\u0627\u0644\u0629 \u0645\u0634 403 (200 \u0623\u0648 404 \u0644\u0648 \u0644\u0633\u0647 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634)", { tier: true, branch: true }, { tier: t.status === 200 || t.status === 404, branch: b.status === 200 || b.status === 404 }, `tier ${t.status} | branch ${b.status}`);
+    }
+  },
+  {
+    id: "P2-08",
+    title: "\u062D\u0633\u0627\u0628 \u0645\u0639\u0644\u0651\u0642 \u0623\u0648 \u0645\u0631\u0641\u0648\u0636: \u0645\u0645\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0628\u064A\u0639 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0648\u0627\u0644\u062A\u062C\u0645\u064A\u0639 (H4)",
+    run: async (c) => {
+      if (!c.unapproved) return c.skip("P2-08", "\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647", "\u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0628\u064A\u062A\u0634\u063A\u0651\u0644 \u0628\u062D\u0633\u0627\u0628 \u0645\u0639\u0644\u0651\u0642 \u0623\u0648 \u0645\u0631\u0641\u0648\u0636 \u0628\u0633 (\u0633\u062C\u0651\u0644 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F \u0628\u0625\u064A\u0645\u064A\u0644 \u062A\u0627\u0646\u064A \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u062A\u0639\u062A\u0645\u062F\u0647)");
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const s = c.sale("h4");
+      const saved = await salesStore._attempt("upsert", s);
+      const rows = await fetchSalesInRange(SYS_OLD_TS - 1e3, SYS_OLD_TS + 1e3);
+      const settings = await c.getDoc("settings_col", "invoice_number_settings");
+      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_h4`;
+      const agg = await attemptInvoiceAggregateWrite(day, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", `${SYSTEM_TEST_PREFIX}${c.runId}_h4agg`, 7);
+      if (saved === "ok") c.leftover(`sales_col/${s.id}`, "\u0627\u062A\u0642\u0628\u0644\u062A \u0645\u0646 \u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 \u2014 \u062F\u0647 \u062E\u0644\u0644");
+      c.check("P2-08", "\u0643\u0644 \u0627\u0644\u0639\u0645\u0644\u064A\u0627\u062A \u0627\u062A\u0631\u0641\u0636\u062A", { sale: "drop", read: null, settings: 403, aggregate: "drop" }, { sale: saved, read: rows, settings: settings.status, aggregate: agg });
+    }
+  }
+];
 const SYS_PARTS = [
   { id: "S1", title: "\u0627\u0644\u062E\u0637\u0648\u0629 1 \u2014 \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 (\u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0642\u062F\u064A\u0645)", legacy: true },
-  { id: "P1", title: "\u0627\u0644\u062C\u0632\u0621 1 \u2014 \u0627\u0644\u0628\u064A\u0639 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", checks: SYS_PART1_CHECKS }
+  { id: "P1", title: "\u0627\u0644\u062C\u0632\u0621 1 \u2014 \u0627\u0644\u0628\u064A\u0639 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", checks: SYS_PART1_CHECKS },
+  { id: "P2", title: "\u0627\u0644\u062C\u0632\u0621 2 \u2014 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0648\u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0648\u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0639\u0644\u0651\u0642\u0629", checks: SYS_PART2_CHECKS, allowUnapproved: true }
 ];
 async function sysRunPart(part, acct, runId, log, sink) {
   log(`
@@ -6349,15 +6487,23 @@ function sysSummary(sink) {
           log("\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.");
           return;
         }
-        if (!acct.ok || acct.role === "pending" || acct.role === "unknown") {
-          log("\u26D4 \u0627\u0644\u062D\u0633\u0627\u0628 \u062F\u0647 \u0645\u0634 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 (\u0623\u0648 \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0642\u0631\u0627\u0647). \u0627\u062F\u062E\u0644 \u0628\u062D\u0633\u0627\u0628 \u0623\u062F\u0645\u0646 \u0623\u0648 \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647.");
+        if (!acct.ok) {
+          log("\u26D4 \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0642\u0631\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 (\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644\u061F). \u062C\u0631\u0651\u0628 \u062A\u0627\u0646\u064A.");
           return;
         }
+        const unapproved = acct.role === "pending" || acct.role === "unknown";
         const runId = Date.now().toString(36);
         const sink = { results: [], leftovers: [] };
-        log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${acct.email} \u2014 \u0627\u0644\u0646\u0648\u0639: ${acct.role === "admin" ? "\u0623\u062F\u0645\u0646" : "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A"} \u2014 \u0631\u0642\u0645 \u0627\u0644\u062A\u0634\u063A\u064A\u0644\u0629: ${runId}`);
+        log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${acct.email} \u2014 \u0627\u0644\u0646\u0648\u0639: ${acct.role === "admin" ? "\u0623\u062F\u0645\u0646" : acct.role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : "\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647"} \u2014 \u0631\u0642\u0645 \u0627\u0644\u062A\u0634\u063A\u064A\u0644\u0629: ${runId}`);
         for (const id of partIds) {
-          await sysRunPart(SYS_PARTS.find((p) => p.id === id), acct, runId, log, sink);
+          const part = SYS_PARTS.find((p) => p.id === id);
+          if (unapproved && !part.allowUnapproved) {
+            log(`
+\u2501\u2501 ${part.title} \u2501\u2501
+\u23ED\uFE0F \u0627\u062A\u062E\u0637\u064A\u062A\u0647: \u0627\u0644\u062C\u0632\u0621 \u062F\u0647 \u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0623\u062F\u0645\u0646 \u0623\u0648 \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647.`);
+            continue;
+          }
+          await sysRunPart(part, acct, runId, log, sink);
         }
         const s = sysSummary(sink);
         log("");
