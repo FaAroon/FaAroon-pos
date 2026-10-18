@@ -1063,11 +1063,15 @@ function suggestUsualBranch(attendance, employeeName) {
   });
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
 }
-function currentResetKey(freq) {
-  const now = /* @__PURE__ */ new Date();
-  if (freq === "daily") return now.toISOString().slice(0, 10);
-  if (freq === "monthly") return now.toISOString().slice(0, 7);
-  return null;
+const INVOICE_RESET_HOUR = 6;
+function currentResetKey(freq, nowMs) {
+  if (freq !== "daily" && freq !== "monthly") return null;
+  const d = new Date(nowMs === void 0 ? Date.now() : nowMs);
+  if (d.getHours() < INVOICE_RESET_HOUR) d.setDate(d.getDate() - 1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  if (freq === "monthly") return `${y}-${m}`;
+  return `${y}-${m}-${String(d.getDate()).padStart(2, "0")}`;
 }
 function takeNextInvoiceNumber(settings) {
   const key = currentResetKey(settings.resetFrequency);
@@ -4685,8 +4689,8 @@ function InvoiceNumberSettingsModal({ invoiceNumberSettings, setInvoiceNumberSet
   const [resetNowConfirm, setResetNowConfirm] = useState(false);
   const FREQ_OPTIONS = [
     { key: "never", label: "\u0623\u0628\u062F\u064B\u0627 (\u064A\u0641\u0636\u0644 \u064A\u0632\u064A\u062F \u0639\u0644\u0649 \u0637\u0648\u0644)" },
-    { key: "daily", label: "\u064A\u0648\u0645\u064A\u064B\u0627 (\u064A\u0631\u062C\u0639 \u0661 \u0643\u0644 \u064A\u0648\u0645)" },
-    { key: "monthly", label: "\u0634\u0647\u0631\u064A\u064B\u0627 (\u064A\u0631\u062C\u0639 \u0661 \u0643\u0644 \u0634\u0647\u0631)" }
+    { key: "daily", label: "\u064A\u0648\u0645\u064A\u064B\u0627 (\u064A\u0631\u062C\u0639 \u0661 \u0643\u0644 \u064A\u0648\u0645 \u0627\u0644\u0633\u0627\u0639\u0629 \u0666 \u0627\u0644\u0635\u0628\u062D)" },
+    { key: "monthly", label: "\u0634\u0647\u0631\u064A\u064B\u0627 (\u064A\u0631\u062C\u0639 \u0661 \u0623\u0648\u0644 \u0643\u0644 \u0634\u0647\u0631 \u0627\u0644\u0633\u0627\u0639\u0629 \u0666 \u0627\u0644\u0635\u0628\u062D)" }
   ];
   const save = () => {
     const updated = { ...invoiceNumberSettings, resetFrequency };
@@ -5967,8 +5971,8 @@ async function runSystemTestStep1(role, log) {
   const guardName = `${resourceRoot}/invoice_aggregate_writes_col/${invoiceId}`;
   const fieldPath = firestoreFieldPath(["days", testDay, branch, "sales", invoiceId]);
   log("\u2014 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u0644\u0644\u064A \u0647\u0644\u0645\u0633\u0647\u0627 \u2014");
-  log(`1) invoice_aggregate_writes_col/${invoiceId}  \u0625\u0646\u0634\u0627\u0621\u060C \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0630\u0641 \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642`);
-  log(`2) monthly_aggregates_col/${monthId}  \u062D\u0642\u0644 days.${testDay} \u0641\u0642\u0637`);
+  log(`\u0661- invoice_aggregate_writes_col/${invoiceId}  \u0625\u0646\u0634\u0627\u0621\u060C \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0630\u0641 \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642`);
+  log(`\u0662- monthly_aggregates_col/${monthId}  \u062D\u0642\u0644 days.${testDay} \u0641\u0642\u0637`);
   log("");
   const commitBody = () => ({
     writes: [
@@ -6344,7 +6348,7 @@ const SYS_PART2_CHECKS = [
         const r = takeNextInvoiceNumber({ nextNumber: 5, resetFrequency: freq, lastResetKey: last });
         return [r.number, r.updatedSettings.nextNumber, r.updatedSettings.lastResetKey];
       };
-      c.note(`\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u064A\u0648\u0645\u064A \u0628\u064A\u062A\u062D\u0633\u0628 \u0628\u062A\u0648\u0642\u064A\u062A \u062C\u0631\u064A\u0646\u062A\u0634: ${today} \u2014 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u062F\u0644\u0648\u0642\u062A\u064A: ${businessDayOf(Date.now())}`);
+      c.note(`\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u064A\u0648\u0645\u064A \u0628\u064A\u062A\u062D\u0633\u0628 \u0628\u0633\u0627\u0639\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 (\u0628\u064A\u062A\u0635\u0641\u0651\u0631 6 \u0627\u0644\u0635\u0628\u062D): ${today} \u2014 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u062F\u0644\u0648\u0642\u062A\u064A: ${businessDayOf(Date.now())}`);
       c.check(
         "P2-05",
         "\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0628\u0639\u062F \u0643\u0644 \u0646\u0648\u0639 \u062A\u0635\u0641\u064A\u0631",
@@ -6404,10 +6408,296 @@ const SYS_PART2_CHECKS = [
     }
   }
 ];
+function sysDeliveryDoc(c, tag, extra) {
+  return c.sale(
+    tag,
+    Object.assign(
+      {
+        fulfillment: "delivery",
+        paid: false,
+        deliveryStatus: "prepared",
+        deliveryArea: "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631",
+        customerPhone: "01000000000",
+        dispatchLocation: null,
+        repName: null,
+        paymentMethod: null,
+        preparedAt: SYS_OLD_TS
+      },
+      extra || {}
+    )
+  );
+}
+async function sysMakeOrder(c, tag, extra) {
+  const doc = sysDeliveryDoc(c, tag, extra);
+  const result = await salesStore._attempt("upsert", doc);
+  c.leftover(`sales_col/${doc.id}`, "\u0623\u0648\u0631\u062F\u0631 \u062A\u0648\u0635\u064A\u0644 \u062A\u062C\u0631\u064A\u0628\u064A (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647)");
+  return { doc, result };
+}
+const sysSendPatch = (extra) => Object.assign({ repName: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631", dispatchLocation: "\u0627\u062E\u062A\u0628\u0627\u0631", sentBy: `${SYSTEM_TEST_PREFIX}sender`, sentAt: SYS_OLD_TS, deliveryStatus: "sent", paid: false, paymentMethod: null, splitTransferMethod: null, cashAmount: null, transferAmount: null, receivedBy: null, receivedAt: null }, extra || {});
+const sysDonePatch = (extra) => Object.assign({ deliveryStatus: "done", paid: true, paymentMethod: "cash", splitTransferMethod: null, cashAmount: null, transferAmount: null, receivedBy: `${SYSTEM_TEST_PREFIX}receiver`, receivedAt: SYS_OLD_TS }, extra || {});
+const sysAdvance = (doc, patch) => Object.assign({}, doc, patch);
+const SYS_PART3_CHECKS = [
+  {
+    id: "P3-01",
+    title: "\u0623\u0648\u0631\u062F\u0631 \u062C\u062F\u064A\u062F \u0632\u064A \u0645\u0627 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0628\u064A\u0639\u0645\u0644\u0647: \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u0648\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u062F\u0648\u0646 \u0645\u0643\u0627\u0646 \u062E\u0631\u0648\u062C (G1/G3)",
+    run: async (c) => {
+      const { doc, result } = await sysMakeOrder(c, "oa");
+      if (result === "ok") c.shared.oa = doc;
+      const g = await c.getDoc("sales_col", doc.id);
+      const d = g.data || {};
+      const back = {
+        fulfillment: d.fulfillment === "delivery",
+        status: d.deliveryStatus === "prepared",
+        unpaid: d.paid === false,
+        area: d.deliveryArea === "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631",
+        phone: d.customerPhone === "01000000000",
+        noDispatch: d.dispatchLocation === null || d.dispatchLocation === void 0,
+        noRep: d.repName === null || d.repName === void 0,
+        noPayment: d.paymentMethod === null || d.paymentMethod === void 0,
+        total: d.total === 7
+      };
+      const allTrue = Object.fromEntries(Object.keys(back).map((k) => [k, true]));
+      c.check("P3-01", "\u0627\u0644\u062D\u0641\u0638 \u062B\u0645 \u0627\u0644\u0642\u0631\u0627\u0621\u0629", { saved: "ok", back: allTrue }, { saved: result, back }, `HTTP ${g.status}`);
+    }
+  },
+  {
+    id: "P3-02",
+    title: "\u0623\u0634\u0643\u0627\u0644 \u0623\u0648\u0631\u062F\u0631 \u063A\u0644\u0637 \u0628\u062A\u062A\u0631\u0641\u0636 \u0644\u0644\u0645\u0648\u0638\u0641: \u0645\u0646 \u063A\u064A\u0631 \u062D\u0627\u0644\u0629\u060C \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0646 \u0627\u0644\u0623\u0648\u0644\u060C \u0646\u0648\u0639 \u0627\u0633\u062A\u0644\u0627\u0645 \u0645\u0634 \u0645\u0639\u0631\u0648\u0641",
+    run: async (c) => {
+      if (c.role === "admin") return c.skip("P3-02", "\u0631\u0641\u0636 \u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "\u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u062A\u062E\u0637\u0649 \u0641\u062D\u0635 \u0627\u0644\u0634\u0643\u0644 (\u0627\u062A\u0623\u0643\u062F\u0646\u0627 \u0641\u064A P1-06) \u2014 \u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 \u0628\u0633");
+      const noStatus = sysDeliveryDoc(c, "bad_nostatus");
+      delete noStatus.deliveryStatus;
+      const cases = [
+        ["\u0645\u0646 \u063A\u064A\u0631 deliveryStatus", noStatus],
+        ["\u062D\u0627\u0644\u0629 done \u0645\u0646 \u0627\u0644\u0623\u0648\u0644", sysDeliveryDoc(c, "bad_done", { deliveryStatus: "done" })],
+        ["\u0646\u0648\u0639 \u0627\u0633\u062A\u0644\u0627\u0645 \u0645\u062C\u0647\u0648\u0644", sysDeliveryDoc(c, "bad_kind", { fulfillment: "courier" })]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, doc] of cases) {
+        const r = await c.putDoc("sales_col", doc.id, doc);
+        const g = await c.getDoc("sales_col", doc.id);
+        actual.push([label, r.ok, g.status]);
+        expected.push([label, false, 404]);
+        if (r.ok) c.leftover(`sales_col/${doc.id}`, `\u0627\u062A\u0642\u0628\u0644 \u0634\u0643\u0644 \u063A\u0644\u0637 (${label}) \u2014 \u062E\u0644\u0644 \u0641\u064A \u0627\u0644\u0642\u0648\u0627\u0639\u062F`);
+      }
+      c.check("P3-02", "\u0643\u0644\u0647\u0645 \u0627\u062A\u0631\u0641\u0636\u0648\u0627 \u0648\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F \u0627\u062A\u0639\u0645\u0644", expected, actual);
+    }
+  },
+  {
+    id: "P3-03",
+    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u0641\u062A\u0648\u062D \u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A) (G5)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a) return c.skip("P3-03", "\u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634 \u0641\u064A \u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647");
+      const rows = await fetchOpenDeliveryOrders();
+      if (rows === null) return c.check("P3-03", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "rows", null, "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644 (\u0645\u0645\u0643\u0646 \u0641\u0647\u0631\u0633 \u0646\u0627\u0642\u0635 \u0623\u0648 \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644)");
+      const mine = rows.find((r) => r.id === a.id);
+      c.check("P3-03", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0644\u064A \u0644\u0633\u0647 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0638\u0627\u0647\u0631", { listed: true, status: "prepared" }, { listed: !!mine, status: mine ? mine.deliveryStatus : null }, `${rows.length} \u0623\u0648\u0631\u062F\u0631 \u0645\u0641\u062A\u0648\u062D \u0641\u064A \u0627\u0644\u0642\u0627\u064A\u0645\u0629`);
+    }
+  },
+  {
+    id: "P3-04",
+    title: "\u0627\u0644\u0623\u0635\u0646\u0627\u0641 \u0648\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0648\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0648\u0627\u0644\u0623\u0633\u0645\u0627\u0621 \u0645\u0627 \u062A\u062A\u063A\u064A\u0631\u0634 \u0628\u0639\u062F \u0627\u0644\u062D\u0641\u0638\u060C \u062D\u062A\u0649 \u0644\u0644\u0623\u062F\u0645\u0646 (G1)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a) return c.skip("P3-04", "\u062D\u0642\u0648\u0644 \u062B\u0627\u0628\u062A\u0629", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634");
+      const attempts = [
+        ["\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A", { total: 8 }],
+        ["\u0627\u0644\u0623\u0635\u0646\u0627\u0641", { items: [{ productName: `${SYSTEM_TEST_PREFIX}other`, unitPrice: 1, qty: 1, lineTotal: 1 }] }],
+        ["\u0627\u0644\u0645\u0646\u0637\u0642\u0629", { deliveryArea: "\u0645\u0646\u0637\u0642\u0629 \u062A\u0627\u0646\u064A\u0629" }],
+        ["\u062A\u0644\u064A\u0641\u0648\u0646 \u0627\u0644\u0632\u0628\u0648\u0646", { customerPhone: "01111111111" }],
+        ["\u0627\u0633\u0645 \u0627\u0644\u0645\u0648\u0638\u0641", { employeeName: `${SYSTEM_TEST_PREFIX}someone_else` }],
+        ["\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", { invoiceNumber: 5 }],
+        ["\u0627\u0633\u0645 \u0627\u0644\u0632\u0628\u0648\u0646", { customerName: "\u0632\u0628\u0648\u0646 \u062A\u0627\u0646\u064A" }],
+        ["\u0648\u0642\u062A \u0627\u0644\u0625\u0646\u0634\u0627\u0621", { createdAt: SYS_OLD_TS + 1e3 }],
+        ["\u0646\u0648\u0639 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0625\u0644\u0649 \u0627\u0633\u062A\u0644\u0627\u0645", { fulfillment: "pickup", paid: true }]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, patch] of attempts) {
+        const r = await c.putDoc("sales_col", a.id, sysAdvance(a, patch));
+        actual.push([label, r.ok]);
+        expected.push([label, false]);
+      }
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      const same = d.total === 7 && d.deliveryArea === "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631" && d.customerPhone === "01000000000" && d.fulfillment === "delivery" && d.deliveryStatus === "prepared" && Array.isArray(d.items) && d.items.length === 1;
+      c.check("P3-04", "\u0643\u0644 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062A\u063A\u064A\u064A\u0631 \u0627\u062A\u0631\u0641\u0636\u062A \u0648\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0632\u064A \u0645\u0627 \u0647\u0648", { attempts: expected, unchanged: true }, { attempts: actual, unchanged: same });
+    }
+  },
+  {
+    id: "P3-05",
+    title: "\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u2190 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0628\u063A\u064A\u0631 \u062F\u0641\u0639: \u0627\u0644\u0645\u0646\u062F\u0648\u0628 \u0648\u0645\u0643\u0627\u0646 \u0627\u0644\u062E\u0631\u0648\u062C \u0628\u064A\u062A\u0633\u062C\u0644\u0648\u0627 (G1/G3)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a) return c.skip("P3-05", "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634");
+      const next = sysAdvance(a, sysSendPatch());
+      const r = await salesStore._attempt("upsert", next);
+      if (r === "ok") c.shared.oa = next;
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      c.check("P3-05", "\u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u062A\u0633\u062C\u0644 \u0648\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0632\u064A \u0645\u0627 \u0647\u0648", { result: "ok", status: "sent", unpaid: true, rep: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631", dispatch: "\u0627\u062E\u062A\u0628\u0627\u0631", total: 7 }, { result: r, status: d.deliveryStatus, unpaid: d.paid === false, rep: d.repName, dispatch: d.dispatchLocation, total: d.total });
+      if (c.role === "employee") c.note("\u0627\u0644\u0645\u0648\u0638\u0641 \u062D\u0631\u0651\u0643 \u0623\u0648\u0631\u062F\u0631 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A: \u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647. \u0627\u0644\u0634\u0627\u0634\u0629 \u0628\u0633 \u0647\u064A \u0627\u0644\u0644\u064A \u0628\u062A\u062E\u0628\u0651\u064A \u0632\u0631\u0627\u0631 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0639\u0646 \u063A\u064A\u0631 \u0635\u0627\u062D\u0628 \u0627\u0644\u0623\u0648\u0631\u062F\u0631.");
+    }
+  },
+  {
+    id: "P3-06",
+    title: "\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u062E\u0644\u0641 \u0645\u0631\u0641\u0648\u0636\u060C \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u064A\u0642\u0641\u0644 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 (G1)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a || a.deliveryStatus !== "sent") return c.skip("P3-06", "\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u062E\u0644\u0641 \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u0627\u062A\u0628\u0639\u062A\xBB");
+      const back = await c.putDoc("sales_col", a.id, sysAdvance(a, { deliveryStatus: "prepared" }));
+      const done = sysAdvance(a, sysDonePatch());
+      const r = await salesStore._attempt("upsert", done);
+      if (r === "ok") c.shared.oa = done;
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      c.check("P3-06", "\u0645\u0646 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0644\u0640\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0645\u0631\u0641\u0648\u0636\u060C \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u064A\u0639\u062F\u0651\u064A \u0648\u064A\u062A\u062E\u0632\u0646 \u0645\u062F\u0641\u0648\u0639", { backRefused: true, receive: "ok", status: "done", paid: true, method: "cash" }, { backRefused: back.ok === false, receive: r, status: d.deliveryStatus, paid: d.paid === true, method: d.paymentMethod });
+    }
+  },
+  {
+    id: "P3-07",
+    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0645\u062A\u062C\u0645\u0651\u062F: \u0644\u0627 \u0631\u062C\u0648\u0639 \u0648\u0644\u0627 \u062A\u063A\u064A\u064A\u0631\u060C \u0648\u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u0646\u0641\u0633 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0645\u0633\u0645\u0648\u062D\u0629 (G1)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a || a.deliveryStatus !== "done") return c.skip("P3-07", "\u062A\u062C\u0645\u064A\u062F \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB");
+      const attempts = [
+        ["\u0631\u062C\u0648\u0639 \u0644\u0640\xAB\u0627\u062A\u0628\u0639\u062A\xBB", { deliveryStatus: "sent" }],
+        ["\u0631\u062C\u0648\u0639 \u0644\u0640\xAB\u0627\u062A\u062C\u0647\u0632\xBB", { deliveryStatus: "prepared" }],
+        ["\u0631\u062C\u0648\u0639 \u0644\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639", { paid: false }],
+        ["\u062A\u063A\u064A\u064A\u0631 \u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u062F\u0641\u0639", { paymentMethod: "instapay" }],
+        ["\u062A\u063A\u064A\u064A\u0631 \u0627\u0633\u0645 \u0627\u0644\u0645\u0646\u062F\u0648\u0628", { repName: "\u0645\u0646\u062F\u0648\u0628 \u062A\u0627\u0646\u064A" }],
+        ["\u062A\u063A\u064A\u064A\u0631 \u0648\u0642\u062A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", { receivedAt: SYS_OLD_TS + 5e3 }]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, patch] of attempts) {
+        const r = await c.putDoc("sales_col", a.id, sysAdvance(a, patch));
+        actual.push([label, r.ok]);
+        expected.push([label, false]);
+      }
+      const same = await c.putDoc("sales_col", a.id, a);
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      c.check("P3-07", "\u0643\u0644 \u0627\u0644\u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0627\u062A\u0631\u0641\u0636\u062A\u060C \u0648\u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0645\u0637\u0627\u0628\u0642\u0629 \u0639\u062F\u0651\u062A\u060C \u0648\u0627\u0644\u0645\u062E\u0632\u0651\u0646 \u0632\u064A \u0645\u0627 \u0647\u0648", { attempts: expected, resend: true, status: "done", paid: true, method: "cash", rep: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631" }, { attempts: actual, resend: same.ok, status: d.deliveryStatus, paid: d.paid === true, method: d.paymentMethod, rep: d.repName });
+    }
+  },
+  {
+    id: "P3-08",
+    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0628\u064A\u062E\u062A\u0641\u064A \u0645\u0646 \u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629 (G5)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a || a.deliveryStatus !== "done") return c.skip("P3-08", "\u0627\u062E\u062A\u0641\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB");
+      const rows = await fetchOpenDeliveryOrders();
+      if (rows === null) return c.check("P3-08", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "rows", null, "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644");
+      c.check("P3-08", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0638\u0627\u0647\u0631 \u0628\u0639\u062F \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 (\u0648\u0642\u062A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0642\u062F\u064A\u0645)", { listed: false }, { listed: rows.some((r) => r.id === a.id) });
+    }
+  },
+  {
+    id: "P3-09",
+    title: "\u0627\u0644\u062F\u0641\u0639 \u0639\u0645\u0631\u0647 \u0645\u0627 \u064A\u0631\u062C\u0639 \xAB\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639\xBB \u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u062A\u0628\u0639\u062A \u0648\u0647\u0648 \u0645\u062F\u0641\u0648\u0639 (\u0627\u0644\u0642\u0627\u0639\u062F\u0629 d.paid == true || o.paid == false)",
+    run: async (c) => {
+      const { doc: b, result } = await sysMakeOrder(c, "ob");
+      if (result !== "ok") return c.check("P3-09", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
+      const sentPaid = sysAdvance(b, sysSendPatch({ paid: true, paymentMethod: "cash" }));
+      const r1 = await salesStore._attempt("upsert", sentPaid);
+      const unpay = await c.putDoc("sales_col", b.id, sysAdvance(sentPaid, { paid: false, paymentMethod: null }));
+      const finish = sysAdvance(sentPaid, sysDonePatch());
+      const r3 = await salesStore._attempt("upsert", finish);
+      c.check("P3-09", "\u0625\u0631\u0633\u0627\u0644 \u0645\u062F\u0641\u0648\u0639 \u062B\u0645 \u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u062D\u0648\u064A\u0644\u0647 \u0644\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u062B\u0645 \u0625\u0646\u0647\u0627\u0624\u0647", { sentPaid: "ok", unpayRefused: true, finish: "ok" }, { sentPaid: r1, unpayRefused: unpay.ok === false, finish: r3 });
+      if (r3 !== "ok") c.leftover(`sales_col/${b.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
+    }
+  },
+  {
+    id: "P3-10",
+    title: "\u0645\u062F\u0641\u0648\u0639 \u0645\u0642\u062F\u0645\u064B\u0627 \u0648\u0642\u062A \u0627\u0644\u0625\u0631\u0633\u0627\u0644 (\u062F\u0641\u0639 \u0645\u0642\u0633\u0651\u0645): \u0628\u064A\u0631\u0648\u062D \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0639\u0644\u0649 \u0637\u0648\u0644 \u0648\u0627\u0644\u0645\u0628\u0627\u0644\u063A \u0628\u062A\u062A\u062E\u0632\u0646 (G1)",
+    run: async (c) => {
+      const { doc: o, result } = await sysMakeOrder(c, "oc");
+      if (result !== "ok") return c.check("P3-10", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
+      const done = sysAdvance(o, sysSendPatch(sysDonePatch({ paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: 3, transferAmount: 4 })));
+      const r = await salesStore._attempt("upsert", done);
+      const g = await c.getDoc("sales_col", o.id);
+      const d = g.data || {};
+      c.check("P3-10", "\u0627\u0644\u062D\u0641\u0638 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629", { result: "ok", status: "done", paid: true, split: true }, { result: r, status: d.deliveryStatus, paid: d.paid === true, split: d.paymentMethod === "split" && d.splitTransferMethod === "instapay" && d.cashAmount === 3 && d.transferAmount === 4 && d.cashAmount + d.transferAmount === d.total });
+      if (r !== "ok") c.leftover(`sales_col/${o.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
+    }
+  },
+  {
+    id: "P3-11",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0623\u0648\u0631\u062F\u0631 \u064A\u062A\u0642\u0641\u0644 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u064A\u062A\u062F\u0641\u0639",
+    run: async (c) => {
+      const { doc: o, result } = await sysMakeOrder(c, "od");
+      if (result !== "ok") return c.check("P3-11", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
+      const r = await c.putDoc("sales_col", o.id, sysAdvance(o, sysDonePatch({ paid: false, paymentMethod: null, receivedBy: null })));
+      const g = await c.getDoc("sales_col", o.id);
+      const d = g.data || {};
+      c.check("P3-11", "\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u064A\u062A\u0631\u0641\u0636 (\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0644\u0627\u0632\u0645 \u064A\u0643\u0648\u0646 \u0645\u062F\u0641\u0648\u0639)", { accepted: false }, { accepted: r.ok === true && d.deliveryStatus === "done" && d.paid === false }, r.ok ? "\u0627\u062A\u0642\u0628\u0644: \u0627\u0644\u0642\u0627\u0639\u062F\u0629 d.paid == true || o.paid == false \u0628\u062A\u0633\u0645\u062D \u0628\u0623\u0648\u0631\u062F\u0631 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639. \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0646\u0641\u0633\u0647 \u0645\u0627 \u0628\u064A\u0639\u0645\u0644\u0634 \u0643\u062F\u0647\u060C \u0644\u0643\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0628\u064A\u0633\u0645\u062D." : "");
+      if (r.ok) c.note("\u0644\u0648 \u062F\u0647 \u0627\u062A\u0642\u0628\u0644\u060C \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0628\u064A\u062A\u0642\u0641\u0644 \u0646\u0647\u0627\u0626\u064A\u064B\u0627 \u0648\u0647\u0648 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0648\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0633\u0628 \u0641\u064A \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631. \u0627\u0644\u062D\u0644 \u0627\u0644\u0645\u0642\u062A\u0631\u062D \u062A\u0639\u062F\u064A\u0644 \u0641\u064A firestore.rules (\u0645\u0627 \u0627\u062A\u0639\u0645\u0644\u0634).");
+      else c.leftover(`sales_col/${o.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
+    }
+  },
+  {
+    id: "P3-12",
+    title: "\u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0627 \u0628\u064A\u062A\u062D\u0642\u0642\u0634 \u0645\u0646 \u0627\u0644\u0623\u0633\u0639\u0627\u0631: \u0625\u062C\u0645\u0627\u0644\u064A \u0635\u0641\u0631 \u0648\u0625\u062C\u0645\u0627\u0644\u064A \u0645\u0634 \u0645\u0637\u0627\u0628\u0642 \u0644\u0644\u0623\u0635\u0646\u0627\u0641 \u0628\u064A\u062A\u0642\u0628\u0644\u0648\u0627 (H6)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P3-12", "\u0623\u0633\u0639\u0627\u0631 \u063A\u0631\u064A\u0628\u0629", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const zero = c.sale("p_zero", { total: 0, items: [{ productName: `${SYSTEM_TEST_PREFIX}item`, unitPrice: 0, qty: 1, lineTotal: 0 }] });
+      const mismatch = c.sale("p_mismatch", { total: 99 });
+      const rz = await salesStore._attempt("upsert", zero);
+      const rm = await salesStore._attempt("upsert", mismatch);
+      c.leftover(`sales_col/${zero.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0625\u062C\u0645\u0627\u0644\u064A \u0635\u0641\u0631");
+      c.leftover(`sales_col/${mismatch.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0625\u062C\u0645\u0627\u0644\u064A \u0645\u0634 \u0645\u0637\u0627\u0628\u0642 \u0644\u0644\u0623\u0635\u0646\u0627\u0641");
+      c.check("P3-12", "\u0627\u062A\u0642\u0628\u0644\u0648\u0627 \u0627\u0644\u0627\u062A\u0646\u064A\u0646 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u062A\u0623\u0643\u062F \u0625\u0646 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0631\u0642\u0645 \u0645\u0648\u062C\u0628 \u0628\u0633)", { zeroTotal: "ok", totalMismatch: "ok" }, { zeroTotal: rz, totalMismatch: rm });
+      c.note("\u064A\u0639\u0646\u064A \u0627\u0644\u062D\u0645\u0627\u064A\u0629 \u0627\u0644\u0648\u062D\u064A\u062F\u0629 \u0644\u0644\u0623\u0633\u0639\u0627\u0631 \u0647\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0646\u0641\u0633\u0647\u0627. \u0644\u0648 \u0627\u0644\u0636\u063A\u0637 \u0627\u0644\u0645\u0637\u0648\u0651\u0644 \u0639\u0644\u0649 \u0633\u0639\u0631 \u0627\u0644\u0633\u0637\u0631 (A14) \u0641\u0639\u0644\u064B\u0627 \u0628\u064A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u064A\u063A\u064A\u0651\u0631 \u0627\u0644\u0633\u0639\u0631\u060C \u064A\u0628\u0642\u0649 \u0645\u0641\u064A\u0634 \u062D\u0627\u062C\u0629 \u062A\u0645\u0646\u0639\u0647 \u064A\u0628\u064A\u0639 \u0628\u0635\u0641\u0631. A14 \u0644\u0633\u0647 \u0645\u062D\u062A\u0627\u062C \u0641\u062D\u0635 \u0645\u0646\u0641\u0635\u0644.");
+    }
+  },
+  {
+    id: "P3-13",
+    title: "\u062A\u0644\u064A\u0641\u0648\u0646 \u0627\u0644\u0632\u0628\u0648\u0646: \u0661\u0661 \u0631\u0642\u0645 \u064A\u0628\u062F\u0623 \u0628\u0640010/011/012/015\u060C \u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629 \u0648\u0645\u0633\u0627\u0641\u0627\u062A \u0648\u0634\u0631\u0637\u0627\u062A \u0645\u0642\u0628\u0648\u0644\u0629 (G2)",
+    run: async (c) => {
+      const ok = (s) => validateEgyptPhone(s) === null;
+      const valid = ["01012345678", "010 1234 5678", "010-1234-5678", "\u0660\u0661\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668", "01512345678"];
+      const invalid = ["0101234567", "010123456789", "01312345678", "01412345678", "01612345678", "01912345678", "", "abc", "+201012345678"];
+      c.check("P3-13", "\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0627\u0644\u0635\u062D\u064A\u062D\u0629 \u0628\u062A\u0639\u062F\u0651\u064A \u0648\u0627\u0644\u063A\u0644\u0637 \u0628\u064A\u062A\u0631\u0641\u0636", { valid: valid.map(() => true), invalid: invalid.map(() => false) }, { valid: valid.map(ok), invalid: invalid.map(ok) });
+      c.note("\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0644\u064A \u0628\u064A\u0628\u062F\u0623 \u0628\u0640+20 \u0628\u064A\u062A\u0631\u0641\u0636 (\u0661\u0662 \u0631\u0642\u0645 \u0628\u0639\u062F \u0634\u064A\u0644 \u0627\u0644\u0639\u0644\u0627\u0645\u0627\u062A). \u0644\u0648 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u0628\u064A\u0644\u0635\u0642\u0648\u0627 \u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0643\u062F\u0647\u060C \u0645\u0645\u0643\u0646 \u0646\u0642\u0628\u0644\u0647 \u0648\u0646\u0634\u064A\u0644 20.");
+    }
+  },
+  {
+    id: "P3-14",
+    title: "\u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u062F\u0641\u0639 \u0639\u0646\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645: \u062F\u0641\u0639 \u0645\u0642\u0633\u0651\u0645 (G4)",
+    run: async (c) => {
+      const v = (pm, price) => validatePaymentMethod(pm, price) === null;
+      const cases = [
+        ["\u0645\u0646 \u063A\u064A\u0631 \u0637\u0631\u064A\u0642\u0629", { paymentMethod: "" }, 7, false],
+        ["\u0643\u0627\u0634", { paymentMethod: "cash" }, 7, true],
+        ["\u0641\u0648\u062F\u0627\u0641\u0648\u0646 \u0643\u0627\u0634", { paymentMethod: "vodafone_cash" }, 7, true],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0645\u0646 \u063A\u064A\u0631 \u0648\u0633\u064A\u0644\u0629 \u062A\u062D\u0648\u064A\u0644", { paymentMethod: "split", splitTransferMethod: "", cashAmount: "3", transferAmount: "4" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0628\u0645\u0628\u0627\u0644\u063A \u0641\u0627\u0636\u064A\u0629", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "", transferAmount: "" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0645\u062C\u0645\u0648\u0639\u0647 \u0623\u0642\u0644", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "3" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0641\u0631\u0642 \u0660\u066B\u0660\u0662", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "4.02" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0641\u0631\u0642 \u0660\u066B\u0660\u0660\u0665", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "4.005" }, 7, true],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0628\u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629", { paymentMethod: "split", splitTransferMethod: "vodafone_cash", cashAmount: "\u0663", transferAmount: "\u0664" }, 7, true]
+      ];
+      c.check("P3-14", "\u0643\u0644 \u062D\u0627\u0644\u0629 \u0628\u062A\u062F\u064A\u0643 \u0627\u0644\u0631\u062F \u0627\u0644\u0645\u062A\u0648\u0642\u0639", cases.map((x) => [x[0], x[3]]), cases.map((x) => [x[0], v(x[1], x[2])]));
+    }
+  },
+  {
+    id: "P3-M1",
+    title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u062A\u0648\u0635\u064A\u0644",
+    run: async (c) => {
+      c.skip("P3-M1a", "\u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0641\u0627\u0636\u064A\u0629 \u0641\u064A \u0646\u0627\u0641\u0630\u0629 \u0627\u0644\u062F\u0641\u0639 (\u062F\u0644\u064A\u0641\u0631\u064A)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0643\u062A\u0628 \u0623\u0648\u0631\u062F\u0631 \u0645\u0646 \u063A\u064A\u0631 \u0645\u0646\u0637\u0642\u0629\u060C \u0644\u0627\u0632\u0645 \u062A\u0638\u0647\u0631 \xAB\u0627\u0643\u062A\u0628 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0623\u0648 \u0627\u0633\u0645 \u0627\u0644\u0645\u062D\u0644\xBB \u0648\u0645\u0627\u064A\u062A\u062D\u0641\u0638\u0634");
+      c.skip("P3-M1b", "\u062A\u0628\u0648\u064A\u0628 \xAB\u0623\u0648\u0631\u062F\u0631\u0627\u062A\u064A\xBB \u0644\u0644\u0645\u0648\u0638\u0641", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0639\u0645\u0644 \u0623\u0648\u0631\u062F\u0631 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0648\u062A\u0623\u0643\u062F \u0625\u0646\u0647 \u0628\u064A\u0638\u0647\u0631 \u0639\u0646\u062F\u0647\u060C \u0648\u0625\u0646 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0645\u0646 \u063A\u064A\u0631 \u0635\u0644\u0627\u062D\u064A\u0629 viewAllOrders \u0645\u0627 \u0628\u064A\u0634\u0648\u0641\u0648\u0634 \u0641\u064A \xAB\u0623\u0648\u0631\u062F\u0631\u0627\u062A\u064A\xBB");
+      c.skip("P3-M1c", "\u0632\u0631\u0627\u0631 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0635\u0627\u062D\u0628 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0628\u0633", "\u270B \u064A\u062F\u0648\u064A: \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u064A\u0641\u062A\u062D \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u060C \u0644\u0627\u0632\u0645 \u064A\u0644\u0627\u0642\u064A \xAB\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644\xBB \u0645\u062E\u0641\u064A (\u0627\u0644\u0634\u0627\u0634\u0629 \u0628\u0633 \u0647\u064A \u0627\u0644\u0644\u064A \u0628\u062A\u0645\u0646\u0639)");
+      c.skip("P3-M1d", "\u062A\u062D\u0630\u064A\u0631\u0627\u062A \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0639\u0644\u0649 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 (G4)", "\u270B \u064A\u062F\u0648\u064A: \u0646\u0641\u0633 \u062A\u062D\u0630\u064A\u0631\u0627\u062A \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0627\u0644\u0623\u0635\u0641\u0631 \u0641\u064A \u0627\u0644\u062F\u0644\u064A\u0641\u0631\u064A \u0632\u064A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645");
+    }
+  }
+];
 const SYS_PARTS = [
   { id: "S1", title: "\u0627\u0644\u062E\u0637\u0648\u0629 1 \u2014 \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 (\u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0642\u062F\u064A\u0645)", legacy: true },
   { id: "P1", title: "\u0627\u0644\u062C\u0632\u0621 1 \u2014 \u0627\u0644\u0628\u064A\u0639 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", checks: SYS_PART1_CHECKS },
-  { id: "P2", title: "\u0627\u0644\u062C\u0632\u0621 2 \u2014 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0648\u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0648\u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0639\u0644\u0651\u0642\u0629", checks: SYS_PART2_CHECKS, allowUnapproved: true }
+  { id: "P2", title: "\u0627\u0644\u062C\u0632\u0621 2 \u2014 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0648\u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0648\u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0639\u0644\u0651\u0642\u0629", checks: SYS_PART2_CHECKS, allowUnapproved: true },
+  { id: "P3", title: "\u0627\u0644\u062C\u0632\u0621 3 \u2014 \u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u062A\u0648\u0635\u064A\u0644", checks: SYS_PART3_CHECKS }
 ];
 async function sysRunPart(part, acct, runId, log, sink) {
   log(`
