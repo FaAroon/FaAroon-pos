@@ -469,7 +469,7 @@ function fromFirestoreFields(fields) {
   });
   return obj;
 }
-const OFFLINE_QUEUE_KEY = "alawadly_offline_queue_v1";
+const OFFLINE_QUEUE_KEY = "dev_alawadly_offline_queue_v1";
 function getOfflineQueue() {
   try {
     return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
@@ -1149,7 +1149,7 @@ function todayStr() {
   const d = /* @__PURE__ */ new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-const CURRENT_BRANCH_KEY = "faaroon_current_branch";
+const CURRENT_BRANCH_KEY = "dev_faaroon_current_branch";
 function saveCurrentBranch(branchName) {
   try {
     localStorage.setItem(CURRENT_BRANCH_KEY, branchName || "");
@@ -1267,7 +1267,7 @@ async function attemptInvoiceAggregateWrite(businessDay, branchName, kind, invoi
     return "retry";
   }
 }
-const AGG_QUEUE_KEY = "faaroon_agg_queue_v1";
+const AGG_QUEUE_KEY = "dev_faaroon_agg_queue_v1";
 let aggQueueIdSeq = 0;
 function nextAggQueueId() {
   return `${Date.now()}_${++aggQueueIdSeq}`;
@@ -1413,8 +1413,8 @@ async function batchGetImages(ids) {
     return {};
   }
 }
-const SESSION_KEY = "alawadly_session";
-const SESSION_REFRESH_KEY = "alawadly_auth_refresh";
+const SESSION_KEY = "dev_alawadly_session";
+const SESSION_REFRESH_KEY = "dev_alawadly_auth_refresh";
 function saveSession(user) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ id: user.id }));
@@ -1443,7 +1443,7 @@ function clearSession() {
   }
   clearAuthTokens();
 }
-const CASHIER_INVOICES_KEY = "faaroon_cashier_invoices";
+const CASHIER_INVOICES_KEY = "dev_faaroon_cashier_invoices";
 function saveCashierInvoices(invoices) {
   try {
     localStorage.setItem(CASHIER_INVOICES_KEY, JSON.stringify({ invoices }));
@@ -1572,7 +1572,7 @@ function playUnsavedAlarm() {
   } catch (e) {
   }
 }
-const DATA_CACHE_PREFIX = "faaroon_cache_";
+const DATA_CACHE_PREFIX = "dev_faaroon_cache_";
 function saveDataCache(key, data) {
   try {
     localStorage.setItem(DATA_CACHE_PREFIX + key, JSON.stringify(data));
@@ -1588,7 +1588,7 @@ function loadDataCache(key) {
   }
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const IDB_NAME = "faaroon_idb";
+const IDB_NAME = "dev_faaroon_idb";
 const IDB_STORE = "cache";
 function idbOpen() {
   return new Promise((resolve, reject) => {
@@ -1632,7 +1632,7 @@ async function idbSet(key, value) {
   }
 }
 const DATA_EPOCH = "2026-10-real-email-accounts";
-const DATA_EPOCH_KEY = "faaroon_data_epoch";
+const DATA_EPOCH_KEY = "dev_faaroon_data_epoch";
 function purgeLocalDataForNewEpoch() {
   try {
     if (localStorage.getItem(DATA_EPOCH_KEY) === DATA_EPOCH) return false;
@@ -5991,5 +5991,1645 @@ function ReturnsScreen({ user, sales, setView }) {
     );
   })), totalPages > 1 && /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-4 mt-4" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setPage((p) => Math.max(0, p - 1)), disabled: pageSafe === 0, className: "btn-ghost rounded-xl p-2 disabled:opacity-30" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16, style: { transform: "rotate(180deg)" } })), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-[#94A3B8]" }, pageSafe + 1, " \u0645\u0646 ", totalPages), /* @__PURE__ */ React.createElement("button", { onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)), disabled: pageSafe >= totalPages - 1, className: "btn-ghost rounded-xl p-2 disabled:opacity-30" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16 })))));
 }
+const FAAROON_DEV_BUILD = true;
+const SYSTEM_TEST_EXPECTED_PROJECT = "alawadly-53e7d";
+const SYSTEM_TEST_PREFIX = "__sys_test_";
+const SYSTEM_TEST_AMOUNT = 7;
+(function mountBetaBanner() {
+  try {
+    const bar = document.createElement("div");
+    bar.id = "faaroon-beta-banner";
+    bar.textContent = "\u{1F9EA} \u0646\u0633\u062E\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 / Beta \u2014 Firebase \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A (\u0628\u064A\u0627\u0646\u0627\u062A\u0647 \u062A\u062C\u0631\u064A\u0628\u064A\u0629)";
+    bar.setAttribute(
+      "style",
+      "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:calc(2px + env(safe-area-inset-top, 0px)) 8px 2px;background:#DC2626;color:#FFFFFF;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;"
+    );
+    document.body.appendChild(bar);
+  } catch (e) {
+  }
+})();
+async function sysTestHttp(method, url, token, body) {
+  const res = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: body ? JSON.stringify(body) : void 0
+  });
+  let json = null;
+  try {
+    json = await res.json();
+  } catch (e) {
+    json = null;
+  }
+  let detail = "";
+  if (!res.ok && json && json.error) detail = `${json.error.status || ""} ${json.error.message || ""}`.trim();
+  return { ok: res.ok, status: res.status, detail, json };
+}
+function sysTestExpectations(role) {
+  const canRead = role === "admin" || role === "viewReports";
+  const approved = role !== "pending";
+  return { commitOk: approved, readOk: canRead };
+}
+async function runSystemTestStep1(role, log) {
+  const runId = Date.now().toString(36);
+  const testDay = `${SYSTEM_TEST_PREFIX}${runId}`;
+  const invoiceId = `${SYSTEM_TEST_PREFIX}${runId}_inv`;
+  const branch = "\u0627\u062E\u062A\u0628\u0627\u0631";
+  const exp = sysTestExpectations(role);
+  const results = [];
+  const record = (id, title, expectedOk, actualOk, yes, no, extra) => {
+    const match = expectedOk === actualOk;
+    results.push({ id, title, expectedOk, actualOk, match });
+    log(`${match ? "\u2705" : "\u274C"} ${id} ${title}
+    \u0627\u0644\u0645\u062A\u0648\u0642\u0639: ${expectedOk ? yes : no} | \u0627\u0644\u0641\u0639\u0644\u064A: ${actualOk ? yes : no}${extra ? "\n    " + extra : ""}`);
+  };
+  log(`\u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${FIREBASE_PROJECT_ID}`);
+  if (FIREBASE_PROJECT_ID !== SYSTEM_TEST_EXPECTED_PROJECT) {
+    log(`\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.`);
+    return { aborted: true, results };
+  }
+  const token = await ensureAuth();
+  let who = "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641";
+  try {
+    const claims = decodeIdTokenClaims(token) || {};
+    who = `${claims.email || "\u0628\u062F\u0648\u0646 \u0625\u064A\u0645\u064A\u0644"} - verified: ${claims.emailVerified === true ? "\u0646\u0639\u0645" : "\u0644\u0627"}`;
+  } catch (e) {
+    who = "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628";
+  }
+  log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${who}`);
+  log(`\u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u062E\u062A\u0627\u0631 \u0644\u0644\u0641\u062D\u0635: ${role}`);
+  const realDay = businessDayOf(Date.now());
+  const monthId = realDay.slice(0, 7);
+  const resourceRoot = FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "");
+  const monthCol = ["monthly", "aggregates", "col"].join("_");
+  const monthDocUrl = `${FIRESTORE_BASE}/${monthCol}/${monthId}`;
+  const monthDocName = `${resourceRoot}/monthly_aggregates_col/${monthId}`;
+  const guardName = `${resourceRoot}/invoice_aggregate_writes_col/${invoiceId}`;
+  const fieldPath = firestoreFieldPath(["days", testDay, branch, "sales", invoiceId]);
+  log("\u2014 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u0644\u0644\u064A \u0647\u0644\u0645\u0633\u0647\u0627 \u2014");
+  log(`\u0661- invoice_aggregate_writes_col/${invoiceId}  \u0625\u0646\u0634\u0627\u0621\u060C \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0630\u0641 \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642`);
+  log(`\u0662- monthly_aggregates_col/${monthId}  \u062D\u0642\u0644 days.${testDay} \u0641\u0642\u0637`);
+  log("");
+  const commitBody = () => ({
+    writes: [
+      {
+        update: {
+          name: guardName,
+          fields: toFirestoreFields({ invoiceId, businessDay: testDay, branch, kind: "sales", amount: SYSTEM_TEST_AMOUNT })
+        },
+        currentDocument: { exists: false }
+      },
+      {
+        transform: {
+          document: monthDocName,
+          fieldTransforms: [{ fieldPath, increment: toFirestoreValue(SYSTEM_TEST_AMOUNT) }]
+        }
+      }
+    ]
+  });
+  const safe = async (fn) => {
+    try {
+      return await fn();
+    } catch (e) {
+      return { ok: false, status: 0, detail: `network: ${e.message}`, json: null };
+    }
+  };
+  const t1 = await safe(() => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, commitBody()));
+  record("S1-T1", "\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0628\u0640:commit \u0628\u062F\u0648\u0646 \u0642\u0631\u0627\u0621\u0629", exp.commitOk, t1.ok, "\u0646\u062C\u062D", "\u0627\u062A\u0631\u0641\u0636", `HTTP ${t1.status} ${t1.detail}`);
+  const t2 = await safe(() => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, commitBody()));
+  record("S1-T2", "\u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0640commit \u0644\u0627\u0632\u0645 \u062A\u062A\u0631\u0641\u0636", false, t2.ok, "\u0646\u062C\u062D", "\u0627\u062A\u0631\u0641\u0636", `HTTP ${t2.status} ${t2.detail}`);
+  const t3 = await safe(() => sysTestHttp("GET", monthDocUrl, token));
+  record("S1-T3", "\u0642\u0631\u0627\u0621\u0629 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631", exp.readOk, t3.ok, "\u0646\u062C\u062D\u062A", "\u0627\u062A\u0631\u0641\u0636\u062A", `HTTP ${t3.status} ${t3.detail}`);
+  if (t3.ok && t3.json && t3.json.fields) {
+    let value = null;
+    try {
+      const days = fromFirestoreFields(t3.json.fields).days || {};
+      const node = days[testDay] && days[testDay][branch] && days[testDay][branch].sales;
+      value = node ? node[invoiceId] : null;
+    } catch (e) {
+      value = null;
+    }
+    record("S1-T4", "\u0627\u0644\u0642\u064A\u0645\u0629 \u0627\u0644\u0645\u0633\u062C\u0644\u0629 = \u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633", true, value === SYSTEM_TEST_AMOUNT, "\u062A\u0633\u0627\u0648\u064A " + SYSTEM_TEST_AMOUNT, "\u0645\u062E\u062A\u0644\u0641\u0629: " + String(value));
+  } else {
+    log("\u23ED\uFE0F S1-T4 \u0627\u062A\u062E\u0637\u0649: \u0627\u0644\u062D\u0633\u0627\u0628 \u062F\u0647 \u0645\u0627 \u0642\u0631\u0627\u0634 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u060C \u0641\u0645\u0634 \u0647\u064A\u0646\u0641\u0639 \u0623\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0642\u064A\u0645\u0629 \u0645\u0646 \u0647\u0646\u0627.");
+  }
+  if (t1.ok) {
+    const t5 = await safe(
+      () => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, {
+        writes: [{ update: { name: monthDocName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
+      })
+    );
+    log(`${t5.ok ? "\u{1F9F9}" : "\u26A0\uFE0F"} S1-T5 \u062A\u0646\u0638\u064A\u0641 \u062D\u0642\u0644 days.${testDay}: ${t5.ok ? "\u062A\u0645" : "\u0645\u0627 \u0627\u062A\u0645\u0633\u062D\u0634"} | HTTP ${t5.status} ${t5.detail}`);
+    if (!t5.ok) log(`   \u0627\u0645\u0633\u062D \u0627\u0644\u062D\u0642\u0644 \u062F\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console: monthly_aggregates_col/${monthId} \u2190 days \u2190 ${testDay}`);
+  } else {
+    log("\u23ED\uFE0F S1-T5 \u0645\u0641\u064A\u0634 \u062A\u0646\u0638\u064A\u0641: \u0627\u0644\u0643\u062A\u0627\u0628\u0629 \u0627\u0644\u0623\u0648\u0644\u0649 \u0645\u0627 \u0646\u062C\u062D\u062A\u0634.");
+  }
+  log("");
+  log("\u2014 \u062A\u0646\u0638\u064A\u0641 \u064A\u062F\u0648\u064A \u0645\u0637\u0644\u0648\u0628 \u0645\u0646 Firebase Console \u2014");
+  if (t1.ok) log(`\u0627\u0645\u0633\u062D \u0627\u0644\u0645\u0633\u062A\u0646\u062F: invoice_aggregate_writes_col/${invoiceId}`);
+  else log("\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u062A\u0643\u062A\u0628\u062A.");
+  const bad = results.filter((r) => !r.match).length;
+  log("");
+  log(bad === 0 ? `\u0627\u0644\u0646\u062A\u064A\u062C\u0629: ${results.length} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0645\u062A\u0648\u0642\u0639` : `\u0627\u0644\u0646\u062A\u064A\u062C\u0629: ${bad} \u0641\u062D\u0635 \u0645\u062E\u0627\u0644\u0641 \u0644\u0644\u0645\u062A\u0648\u0642\u0639 \u0645\u0646 ${results.length}`);
+  return { aborted: false, results };
+}
+const SYS_OLD_TS = 9466848e5;
+const sysFmt = (v) => typeof v === "string" ? v : JSON.stringify(v);
+async function sysDetectAccount() {
+  try {
+    const token = await ensureAuth();
+    const claims = decodeIdTokenClaims(token) || {};
+    const uid2 = claims.uid || null;
+    const email = claims.email || "";
+    const me = uid2 ? await fetchUserDocById(uid2) : null;
+    if (me === void 0) return { ok: false, role: "offline", email, label: "\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u2014 \u0645\u0642\u062F\u0631\u062A\u0634 \u0623\u0639\u0631\u0641 \u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628" };
+    if (!me) return { ok: true, role: "unknown", email, name: "", step1Role: "pending", label: `${email} \u2014 \u0645\u0641\u064A\u0634 \u0633\u062C\u0644 \u062D\u0633\u0627\u0628` };
+    const role = me.status !== "approved" ? "pending" : me.role === "admin" ? "admin" : "employee";
+    const step1Role = role === "admin" ? "admin" : role === "pending" ? "pending" : me.permissions && me.permissions.viewReports ? "viewReports" : "cashier";
+    const roleLabel = role === "admin" ? "\u0623\u062F\u0645\u0646" : role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : `\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 (${me.status || "?"})`;
+    return { ok: true, role, step1Role, uid: uid2, email, name: me.name || "", status: me.status, label: `${me.name || email} \u2014 ${roleLabel}` };
+  } catch (e) {
+    return { ok: false, role: "error", email: "", label: "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628" };
+  }
+}
+function sysMakeContext(acct, runId, log, sink, token) {
+  const c = {
+    role: acct.role,
+    unapproved: acct.role === "pending" || acct.role === "unknown",
+    runId,
+    shared: {},
+    http: async (method, url, body) => {
+      try {
+        return await sysTestHttp(method, url, token, body);
+      } catch (e) {
+        return { ok: false, status: 0, detail: `network: ${e.message}`, json: null };
+      }
+    },
+    docUrl: (col, id) => `${FIRESTORE_BASE}/${col}/${id}`,
+    getDoc: async (col, id) => {
+      const r = await c.http("GET", c.docUrl(col, id));
+      return { status: r.status, data: r.ok && r.json && r.json.fields ? fromFirestoreFields(r.json.fields) : null };
+    },
+    putDoc: (col, id, obj) => c.http("PATCH", c.docUrl(col, id), { fields: toFirestoreFields(obj) }),
+    check: (id, title, expected, actual, extra) => {
+      const match = JSON.stringify(expected) === JSON.stringify(actual);
+      sink.results.push({ id, title, expected, actual, match });
+      log(`${match ? "\u2705" : "\u274C"} ${id} ${title}
+    \u0627\u0644\u0645\u062A\u0648\u0642\u0639: ${sysFmt(expected)} | \u0627\u0644\u0641\u0639\u0644\u064A: ${sysFmt(actual)}${extra ? "\n    " + extra : ""}`);
+      return match;
+    },
+    skip: (id, title, why) => {
+      sink.results.push({ id, title, skipped: true, why });
+      log(`\u23ED\uFE0F ${id} ${title} \u2014 ${why}`);
+    },
+    note: (t) => log(`   \u2139\uFE0F ${t}`),
+    leftover: (path, why) => sink.leftovers.push(`${path} \u2014 ${why}`),
+    sale: (tag, extra) => {
+      const id = `${SYSTEM_TEST_PREFIX}${runId}_${tag}`;
+      return Object.assign(
+        {
+          employeeName: `${SYSTEM_TEST_PREFIX}other_employee`,
+          customerName: null,
+          branchName: "\u0627\u062E\u062A\u0628\u0627\u0631",
+          invoiceNumber: 0,
+          tierKey: "retail",
+          items: [{ productName: `${SYSTEM_TEST_PREFIX}item`, unitPrice: 7, qty: 1, lineTotal: 7 }],
+          total: 7,
+          paid: true,
+          fulfillment: "pickup",
+          paymentMethod: "cash",
+          splitTransferMethod: null,
+          cashAmount: null,
+          transferAmount: null,
+          createdAt: SYS_OLD_TS
+        },
+        extra || {},
+        { id }
+      );
+    }
+  };
+  return c;
+}
+const SYS_PART1_CHECKS = [
+  {
+    id: "P1-01",
+    title: "\u062D\u0641\u0638 \u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u0627\u0633\u0645 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A (H1/H2 \u2014 \u0645\u0633\u0645\u0648\u062D \u0628\u0627\u0644\u062A\u0635\u0645\u064A\u0645)",
+    run: async (c) => {
+      const s = c.sale("c1");
+      const r = await salesStore._attempt("upsert", s);
+      c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.shared.sale = s;
+      c.check("P1-01", "\u062D\u0641\u0638 \u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u0633\u062A\u0644\u0627\u0645 (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631)", "ok", r);
+    }
+  },
+  {
+    id: "P1-02",
+    title: "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629: \u0643\u0644 \u0627\u0644\u062D\u0642\u0648\u0644 \u0632\u064A \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A (E6)",
+    run: async (c) => {
+      const s = c.shared.sale;
+      if (!s) return c.skip("P1-02", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", "\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634 \u0641\u064A \u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647");
+      const g = await c.getDoc("sales_col", s.id);
+      const d = g.data || {};
+      const same = g.status === 200 && d.id === s.id && d.total === 7 && d.employeeName === s.employeeName && d.paymentMethod === "cash" && d.fulfillment === "pickup" && d.paid === true && d.branchName === "\u0627\u062E\u062A\u0628\u0627\u0631" && d.createdAt === SYS_OLD_TS && Array.isArray(d.items) && d.items.length === 1 && d.items[0].lineTotal === 7 && d.items[0].qty === 1;
+      c.check("P1-02", "\u0627\u0644\u062D\u0642\u0648\u0644 \u0627\u0644\u0645\u062D\u0641\u0648\u0638\u0629 \u0645\u0637\u0627\u0628\u0642\u0629", true, same, `HTTP ${g.status}`);
+    }
+  },
+  {
+    id: "P1-03",
+    title: "\u0643\u0644 \u0637\u0631\u0642 \u0627\u0644\u062F\u0641\u0639 \u0628\u062A\u062A\u062E\u0632\u0646 \u0635\u062D\u060C \u0648\u0627\u0644\u062F\u0641\u0639 \u0627\u0644\u0645\u0642\u0633\u0651\u0645 (E1/E2)",
+    run: async (c) => {
+      const variants = [
+        ["cash", {}],
+        ["vodafone_cash", {}],
+        ["instapay", {}],
+        ["split", { splitTransferMethod: "instapay", cashAmount: 3, transferAmount: 4 }]
+      ];
+      const saved = [];
+      const back = [];
+      for (const [pm, extra] of variants) {
+        const s = c.sale("pm_" + pm, Object.assign({ paymentMethod: pm }, extra));
+        saved.push(await salesStore._attempt("upsert", s));
+        c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+        const g = await c.getDoc("sales_col", s.id);
+        const d = g.data || {};
+        back.push(d.paymentMethod === pm && (pm !== "split" || d.splitTransferMethod === "instapay" && d.cashAmount === 3 && d.transferAmount === 4 && d.cashAmount + d.transferAmount === d.total));
+      }
+      c.check("P1-03", "\u0627\u0644\u062D\u0641\u0638 \u062B\u0645 \u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0644\u0643\u0644 \u0637\u0631\u064A\u0642\u0629 \u062F\u0641\u0639", { saved: ["ok", "ok", "ok", "ok"], back: [true, true, true, true] }, { saved, back });
+    }
+  },
+  {
+    id: "P1-04",
+    title: "\u062A\u0639\u062F\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0645\u0631\u0641\u0648\u0636 \u0644\u0623\u064A \u062D\u062F \u062D\u062A\u0649 \u0627\u0644\u0623\u062F\u0645\u0646 (H3)",
+    run: async (c) => {
+      const s = c.shared.sale;
+      if (!s) return c.skip("P1-04", "\u062A\u0639\u062F\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u0629", "\u0645\u0641\u064A\u0634 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629");
+      const r = await salesStore._attempt("upsert", Object.assign({}, s, { total: 8 }));
+      const g = await c.getDoc("sales_col", s.id);
+      c.check("P1-04", "\u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A", { result: "drop", total: 7 }, { result: r, total: g.data ? g.data.total : null });
+    }
+  },
+  {
+    id: "P1-05",
+    title: "\u062D\u0630\u0641 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0631\u0641\u0648\u0636 \u0644\u0623\u064A \u062D\u062F \u062D\u062A\u0649 \u0627\u0644\u0623\u062F\u0645\u0646 (H3)",
+    run: async (c) => {
+      const s = c.shared.sale;
+      if (!s) return c.skip("P1-05", "\u062D\u0630\u0641 \u0641\u0627\u062A\u0648\u0631\u0629", "\u0645\u0641\u064A\u0634 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629");
+      const r = await salesStore._attempt("remove", s.id);
+      const g = await c.getDoc("sales_col", s.id);
+      c.check("P1-05", "\u0645\u062D\u0627\u0648\u0644\u0629 \u0627\u0644\u0645\u0633\u062D", { result: "drop", stillThere: true }, { result: r, stillThere: g.status === 200 });
+    }
+  },
+  {
+    id: "P1-06",
+    title: "\u0634\u0643\u0644 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629: \u0627\u0644\u0645\u0648\u0638\u0641 \u0628\u064A\u062A\u0631\u0641\u0636 \u0644\u0647 \u0627\u0644\u063A\u0644\u0637\u060C \u0648\u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0639\u062F\u0651\u064A (\u0627\u0644\u0642\u0627\u0639\u062F\u0629 isAdmin() ||)",
+    run: async (c) => {
+      const isAdmin = c.role === "admin";
+      const cases = [
+        ["\u0627\u0633\u062A\u0644\u0627\u0645 \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639", "bad_unpaid", { paid: false }, false],
+        ["\u0625\u062C\u0645\u0627\u0644\u064A \u0628\u0627\u0644\u0633\u0627\u0644\u0628", "bad_neg", { total: -5 }, false],
+        ["\u062A\u0648\u0635\u064A\u0644 \u0645\u062F\u0641\u0648\u0639 \u0645\u0646 \u0627\u0644\u0628\u062F\u0627\u064A\u0629", "bad_deliv_paid", { fulfillment: "delivery", paid: true, deliveryStatus: "prepared" }, false],
+        ["\u062A\u0648\u0635\u064A\u0644 \u062D\u0627\u0644\u062A\u0647 \u0645\u0634 \xAB\u0627\u062A\u062C\u0647\u0632\xBB", "bad_deliv_sent", { fulfillment: "delivery", paid: false, deliveryStatus: "sent" }, false],
+        ["\u0627\u0644\u0623\u0635\u0646\u0627\u0641 \u0645\u0634 \u0642\u0627\u064A\u0645\u0629", "bad_items", { items: "x" }, true],
+        ["id \u062C\u0648\u0647 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062E\u062A\u0644\u0641 \u0639\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u0646\u062F", "bad_id", {}, true]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, tag, extra, malformed] of cases) {
+        if (isAdmin && malformed) {
+          c.note(`\u0627\u0644\u0623\u062F\u0645\u0646: \u0627\u062A\u062E\u0637\u064A\u062A \xAB${label}\xBB (\u0643\u0627\u0646 \u0647\u064A\u0633\u064A\u0628 \u0633\u062C\u0644 \u0645\u0634\u0648\u0651\u0647 \u062F\u0627\u064A\u0645)`);
+          continue;
+        }
+        let doc = c.sale(tag, extra);
+        let pathId = doc.id;
+        if (tag === "bad_id") doc = Object.assign({}, doc, { id: `${doc.id}_other` });
+        const r = await c.putDoc("sales_col", pathId, doc);
+        actual.push([label, r.ok]);
+        expected.push([label, isAdmin]);
+        if (r.ok) c.leftover(`sales_col/${pathId}`, `\u0633\u062C\u0644 \u062A\u062C\u0631\u064A\u0628\u064A \u063A\u0644\u0637 \u0627\u0644\u0634\u0643\u0644 (${label}) \u2014 \u0627\u062A\u0642\u0628\u0644 \u0644\u0623\u0646 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u062A\u062E\u0637\u0649 \u0641\u062D\u0635 \u0627\u0644\u0634\u0643\u0644`);
+        if (!isAdmin) {
+          const g = await c.getDoc("sales_col", pathId);
+          actual[actual.length - 1].push(g.status);
+          expected[expected.length - 1].push(404);
+        }
+      }
+      c.check("P1-06", isAdmin ? "\u0627\u0644\u0623\u062F\u0645\u0646: \u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0627\u062A\u0642\u0628\u0644\u062A (\u0645\u062A\u0648\u0642\u0639 \u0645\u0646 \u0627\u0644\u0642\u0648\u0627\u0639\u062F)" : "\u0627\u0644\u0645\u0648\u0638\u0641: \u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0627\u062A\u0631\u0641\u0636\u062A \u0648\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F \u0627\u062A\u0639\u0645\u0644", expected, actual);
+    }
+  },
+  {
+    id: "P1-07",
+    title: "\u0627\u0644\u0631\u0641\u0636 \u0627\u0644\u062F\u0627\u064A\u0645 \u0645\u0634 \u0628\u064A\u062A\u062D\u0637 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 (F3)",
+    run: async (c) => {
+      if (c.role === "admin") return c.skip("P1-07", "\u062A\u0635\u0646\u064A\u0641 \u0627\u0644\u0631\u0641\u0636", "\u0627\u0644\u0623\u062F\u0645\u0646 \u0645\u0634 \u0628\u064A\u062A\u0631\u0641\u0636 \u0644\u0647 \u0634\u0643\u0644 \u0641\u0627\u062A\u0648\u0631\u0629\u060C \u0641\u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 \u0628\u0633");
+      const before = getOfflineQueue().length;
+      const r = await salesStore._attempt("upsert", c.sale("bad_class", { paid: false }));
+      const after = getOfflineQueue().length;
+      c.check("P1-07", "\u0631\u0641\u0636 \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 = \xABdrop\xBB \u0648\u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0632\u064A \u0645\u0627 \u0647\u0648", { result: "drop", queueGrew: false }, { result: r, queueGrew: after > before });
+    }
+  },
+  {
+    id: "P1-08",
+    title: "\u0627\u0644\u062A\u062C\u0645\u064A\u0639 \u0627\u0644\u0634\u0647\u0631\u064A: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0628\u062A\u062A\u062D\u0633\u0628 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 (E9)",
+    run: async (c) => {
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const testDay = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}`;
+      const invId = `${SYSTEM_TEST_PREFIX}${c.runId}_agg`;
+      const first = await attemptInvoiceAggregateWrite(testDay, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", invId, 7);
+      const second = await attemptInvoiceAggregateWrite(testDay, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", invId, 7);
+      c.leftover(`invoice_aggregate_writes_col/${invId}`, "\u0639\u0644\u0627\u0645\u0629 \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.check("P1-08a", "\u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0623\u0648\u0644 \u062B\u0645 \u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", { first: "ok", second: "drop" }, { first, second });
+      if (c.role === "admin") {
+        const g = await c.getDoc("monthly_aggregates_col", monthId);
+        const days = g.data && g.data.days || {};
+        const node = days[testDay] && days[testDay]["\u0627\u062E\u062A\u0628\u0627\u0631"] && days[testDay]["\u0627\u062E\u062A\u0628\u0627\u0631"].sales;
+        c.check("P1-08b", "\u0627\u0644\u0642\u064A\u0645\u0629 \u0641\u064A \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631 = \u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629", 7, node ? node[invId] : null, `HTTP ${g.status}`);
+      } else {
+        c.skip("P1-08b", "\u0642\u0631\u0627\u0621\u0629 \u0642\u064A\u0645\u0629 \u0627\u0644\u0634\u0647\u0631", "\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0645\u0634 \u0645\u0633\u0645\u0648\u062D \u0644\u0647 \u064A\u0642\u0631\u0627 \u0627\u0644\u062A\u062C\u0645\u064A\u0639\u0627\u062A (\u0645\u062A\u0648\u0642\u0639) \u2014 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0641\u062D\u0635\u0647\u0627");
+      }
+      if (first === "ok") {
+        const mdName = `${FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "")}/monthly_aggregates_col/${monthId}`;
+        const t = await c.http("POST", `${FIRESTORE_BASE}:commit`, {
+          writes: [{ update: { name: mdName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
+        });
+        c.note(`${t.ok ? "\u{1F9F9} \u0627\u062A\u0645\u0633\u062D \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0645\u0646 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631" : "\u26A0\uFE0F \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0644\u0633\u0647 \u0641\u064A monthly_aggregates_col/" + monthId + " \u2190 days \u2190 " + testDay}`);
+        if (!t.ok) c.leftover(`monthly_aggregates_col/${monthId} (days.${testDay})`, "\u0627\u0645\u0633\u062D\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console");
+      }
+    }
+  },
+  {
+    id: "P1-09",
+    title: "\u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631: \u0631\u0642\u0645\u064A\u0646 \u0641\u064A \u0646\u0641\u0633 \u0627\u0644\u0644\u062D\u0638\u0629 \u0645\u0627\u064A\u062A\u0643\u0631\u0631\u0634 (D1/D2)",
+    run: async (c) => {
+      const fb = Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS);
+      const [x, y] = await Promise.all([claimNextInvoiceNumber(fb), claimNextInvoiceNumber(fb)]);
+      const after = await c.getDoc("settings_col", "invoice_number_settings");
+      c.check("P1-09a", "\u0631\u0642\u0645\u064A\u0646 \u0627\u062A\u062D\u062C\u0632\u0648\u0627 \u0645\u0639 \u0628\u0639\u0636", true, x.number !== y.number, `\u0627\u0644\u0623\u0631\u0642\u0627\u0645: ${x.number} \u0648 ${y.number}`);
+      c.check("P1-09b", "\u0627\u0644\u0639\u062F\u0627\u062F \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 = \u0623\u0643\u0628\u0631 \u0631\u0642\u0645 + 1", Math.max(x.number, y.number) + 1, after.data ? after.data.nextNumber : null, `HTTP ${after.status}`);
+      c.leftover("settings_col/invoice_number_settings", "\u0627\u0644\u0639\u062F\u0627\u062F \u0632\u0627\u062F \u0628\u0645\u0642\u062F\u0627\u0631 2 (\u0631\u0642\u0645\u064A\u0646 \u0627\u062A\u062D\u0631\u0642\u0648\u0627)");
+    }
+  }
+];
+async function sysCleanupAggDay(c, monthId, testDay) {
+  const mdName = `${FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "")}/monthly_aggregates_col/${monthId}`;
+  const t = await c.http("POST", `${FIRESTORE_BASE}:commit`, {
+    writes: [{ update: { name: mdName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
+  });
+  c.note(t.ok ? "\u{1F9F9} \u0627\u062A\u0645\u0633\u062D \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0645\u0646 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631" : `\u26A0\uFE0F \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0644\u0633\u0647 \u0641\u064A \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631 \u2190 days \u2190 ${testDay}`);
+  if (!t.ok) c.leftover(`monthly_aggregates_col/${monthId} (days.${testDay})`, "\u0627\u0645\u0633\u062D\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console");
+}
+const SYS_PART2_CHECKS = [
+  {
+    id: "P2-01",
+    title: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\xAB\u0641\u0648\u0627\u062A\u064A\u0631\u064A\xBB: \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0628\u0627\u0644\u0645\u062F\u0649 \u0627\u0644\u0632\u0645\u0646\u064A \u0628\u064A\u0631\u062C\u0651\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 (E10)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-01", "\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0628\u0627\u0644\u062A\u0627\u0631\u064A\u062E", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const s = c.sale("q1");
+      const saved = await salesStore._attempt("upsert", s);
+      c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const rows = await fetchSalesInRange(SYS_OLD_TS - 1e3, SYS_OLD_TS + 1e3);
+      const mine = Array.isArray(rows) ? rows.find((r) => r.id === s.id) : null;
+      c.check("P2-01", "\u062D\u0641\u0638 \u062B\u0645 \u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0628\u0627\u0644\u0645\u062F\u0649 (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0641\u0648\u0627\u062A\u064A\u0631\u064A)", { saved: "ok", found: true, total: 7 }, { saved, found: !!mine, total: mine ? mine.total : null }, rows === null ? "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644 (null) \u2014 \u0645\u0645\u0643\u0646 \u064A\u062D\u062A\u0627\u062C index" : `\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0631\u062C\u0651\u0639 ${rows.length} \u0641\u0627\u062A\u0648\u0631\u0629 \u0641\u064A \u0627\u0644\u0645\u062F\u0649`);
+      if (mine && c.role === "employee") c.note("\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0642\u0631\u0627 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0639\u0646 \u0637\u0631\u064A\u0642 \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 \u064A\u0642\u0631\u0627 \u0643\u0644 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u2014 \u0634\u0648\u0641 \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A)");
+    }
+  },
+  {
+    id: "P2-02",
+    title: "\u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0645\u0634 \u0628\u062A\u0638\u0647\u0631 \u0641\u064A \u0623\u064A \u062A\u0642\u0631\u064A\u0631 \u062D\u0642\u064A\u0642\u064A (\u062D\u0645\u0627\u064A\u0629 \u0645\u0646 \u0627\u0644\u062A\u0644\u0648\u062B)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-02", "\u062D\u0645\u0627\u064A\u0629 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const rows = await fetchSalesInRange(Date.now() - 35 * 24 * 60 * 60 * 1e3, Date.now());
+      const leaked = Array.isArray(rows) ? rows.filter((r) => String(r.id || "").startsWith(SYSTEM_TEST_PREFIX)).length : null;
+      c.check("P2-02", "\u0639\u062F\u062F \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u064A \u0622\u062E\u0631 35 \u064A\u0648\u0645", 0, leaked, Array.isArray(rows) ? `\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0631\u062C\u0651\u0639 ${rows.length} \u0641\u0627\u062A\u0648\u0631\u0629 \u062D\u0642\u064A\u0642\u064A\u0629 \u0641\u064A \u0627\u0644\u0645\u062F\u0649` : "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644");
+    }
+  },
+  {
+    id: "P2-03",
+    title: "\u062D\u062F \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0627\u0644\u0633\u0627\u0639\u0629 3 \u0627\u0644\u0641\u062C\u0631 (E15)",
+    run: async (c) => {
+      const L = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0).getTime();
+      const cases = [
+        ["2:59 \u2192 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647", L(2026, 10, 18, 2, 59), "2026-10-17"],
+        ["3:00 \u2192 \u0646\u0641\u0633 \u0627\u0644\u064A\u0648\u0645", L(2026, 10, 18, 3, 0), "2026-10-18"],
+        ["12:00 \u0645\u0646\u062A\u0635\u0641 \u0627\u0644\u0644\u064A\u0644 \u2192 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647", L(2026, 10, 18, 0, 0), "2026-10-17"],
+        ["23:59 \u2192 \u0646\u0641\u0633 \u0627\u0644\u064A\u0648\u0645", L(2026, 10, 18, 23, 59), "2026-10-18"],
+        ["\u0623\u0648\u0644 \u0627\u0644\u0634\u0647\u0631 2:59", L(2026, 11, 1, 2, 59), "2026-10-31"],
+        ["\u0623\u0648\u0644 \u0627\u0644\u0633\u0646\u0629 2:59", L(2027, 1, 1, 2, 59), "2026-12-31"],
+        ["\u0623\u0648\u0644 \u0645\u0627\u0631\u0633 2:59 (\u0633\u0646\u0629 \u0643\u0628\u064A\u0633\u0629)", L(2028, 3, 1, 2, 59), "2028-02-29"],
+        ["\u0623\u0648\u0644 \u0645\u0627\u0631\u0633 2:59 (\u0633\u0646\u0629 \u0639\u0627\u062F\u064A\u0629)", L(2027, 3, 1, 2, 59), "2027-02-28"]
+      ];
+      c.note(`\u0641\u0631\u0642 \u0627\u0644\u062A\u0648\u0642\u064A\u062A \u0639\u0644\u0649 \u0627\u0644\u062C\u0647\u0627\u0632: ${-(/* @__PURE__ */ new Date()).getTimezoneOffset() / 60} \u0633\u0627\u0639\u0629 \u0639\u0646 \u062C\u0631\u064A\u0646\u062A\u0634 (\u0627\u0644\u062D\u0633\u0627\u0628 \u0628\u064A\u0639\u062A\u0645\u062F \u0639\u0644\u0649 \u0633\u0627\u0639\u0629 \u0648\u062A\u0648\u0642\u064A\u062A \u0627\u0644\u062C\u0647\u0627\u0632)`);
+      c.check("P2-03", "\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0644\u0643\u0644 \u062A\u0648\u0642\u064A\u062A", cases.map((x) => [x[0], x[2]]), cases.map((x) => [x[0], businessDayOf(x[1])]));
+    }
+  },
+  {
+    id: "P2-04",
+    title: "\u0645\u062F\u0649 \xAB\u0627\u0644\u0646\u0647\u0627\u0631\u062F\u0647\xBB \u0645\u062A\u0648\u0627\u0641\u0642 \u0645\u0639 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A (E15)",
+    run: async (c) => {
+      const r = businessDayRange(0);
+      const checks = {
+        startEndSameDay: businessDayOf(r.start) === businessDayOf(r.end),
+        justBeforeIsPreviousDay: businessDayOf(r.start - 1) !== businessDayOf(r.start),
+        justAfterIsNextDay: businessDayOf(r.end + 1) !== businessDayOf(r.end),
+        startIs3am: new Date(r.start).getHours() === 3
+      };
+      c.check("P2-04", "\u0628\u062F\u0627\u064A\u0629 \u0648\u0646\u0647\u0627\u064A\u0629 \u0645\u062F\u0649 \u0627\u0644\u064A\u0648\u0645", { startEndSameDay: true, justBeforeIsPreviousDay: true, justAfterIsNextDay: true, startIs3am: true }, checks);
+    }
+  },
+  {
+    id: "P2-05",
+    title: "\u062A\u0635\u0641\u064A\u0631 \u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631: \u0623\u0628\u062F\u064B\u0627 / \u064A\u0648\u0645\u064A\u064B\u0627 / \u0634\u0647\u0631\u064A\u064B\u0627 (D3)",
+    run: async (c) => {
+      const today = currentResetKey("daily");
+      const month = currentResetKey("monthly");
+      const take = (freq, last) => {
+        const r = takeNextInvoiceNumber({ nextNumber: 5, resetFrequency: freq, lastResetKey: last });
+        return [r.number, r.updatedSettings.nextNumber, r.updatedSettings.lastResetKey];
+      };
+      c.note(`\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u064A\u0648\u0645\u064A \u0628\u064A\u062A\u062D\u0633\u0628 \u0628\u0633\u0627\u0639\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 (\u0628\u064A\u062A\u0635\u0641\u0651\u0631 6 \u0627\u0644\u0635\u0628\u062D): ${today} \u2014 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u062F\u0644\u0648\u0642\u062A\u064A: ${businessDayOf(Date.now())}`);
+      c.check(
+        "P2-05",
+        "\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0628\u0639\u062F \u0643\u0644 \u0646\u0648\u0639 \u062A\u0635\u0641\u064A\u0631",
+        { never_old: [5, 6, null], daily_same: [5, 6, today], daily_old: [1, 2, today], monthly_same: [5, 6, month], monthly_old: [1, 2, month] },
+        { never_old: take("never", "2000-01-01"), daily_same: take("daily", today), daily_old: take("daily", "2000-01-01"), monthly_same: take("monthly", month), monthly_old: take("monthly", "2000-01") }
+      );
+    }
+  },
+  {
+    id: "P2-06",
+    title: "\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0641\u0631\u0639 \u0628\u062A\u062A\u062C\u0645\u0651\u0639 \u062A\u062D\u062A \xAB\u0628\u062F\u0648\u0646 \u0641\u0631\u0639\xBB (E16)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-06", "\u062A\u062C\u0645\u064A\u0639 \u0628\u062F\u0648\u0646 \u0641\u0631\u0639", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_nb`;
+      const ida = `${SYSTEM_TEST_PREFIX}${c.runId}_nb1`;
+      const idb = `${SYSTEM_TEST_PREFIX}${c.runId}_nb2`;
+      const ra = await attemptInvoiceAggregateWrite(day, "", "sales", ida, 7);
+      const rb = await attemptInvoiceAggregateWrite(day, null, "sales", idb, 7);
+      c.leftover(`invoice_aggregate_writes_col/${ida} \u0648 ${idb}`, "\u0639\u0644\u0627\u0645\u0627\u062A \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.check("P2-06a", "\u062A\u0633\u062C\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u062A\u064A\u0646: \u0641\u0631\u0639 \u0641\u0627\u0636\u064A \u0648\u0641\u0631\u0639 null", ["ok", "ok"], [ra, rb]);
+      if (c.role === "admin") {
+        const g = await c.getDoc("monthly_aggregates_col", monthId);
+        const dayNode = g.data && g.data.days && g.data.days[day] || {};
+        const node = dayNode["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"] && dayNode["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"].sales;
+        c.check("P2-06b", "\u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0644\u064A \u0627\u062A\u0633\u062C\u0644 \u062A\u062D\u062A\u0647 \u0648\u0627\u0644\u0645\u0628\u0627\u0644\u063A", { branches: ["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"], a: 7, b: 7 }, { branches: Object.keys(dayNode), a: node ? node[ida] : null, b: node ? node[idb] : null }, `HTTP ${g.status}`);
+      } else {
+        c.skip("P2-06b", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0645\u0633\u062C\u0651\u0644", "\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0645\u0634 \u0645\u0633\u0645\u0648\u062D \u0644\u0647 \u064A\u0642\u0631\u0627 \u0627\u0644\u062A\u062C\u0645\u064A\u0639\u0627\u062A \u2014 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0641\u062D\u0635\u0647\u0627");
+      }
+      if (ra === "ok" || rb === "ok") await sysCleanupAggDay(c, monthId, day);
+    }
+  },
+  {
+    id: "P2-07",
+    title: "\u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0634\u0631\u0627\u064A\u062D \u0648\u0627\u0644\u0641\u0631\u0648\u0639 \u0645\u0642\u0631\u0648\u0621\u0629 \u0644\u0644\u0643\u0627\u0634\u064A\u0631 (\u0645\u0634 \u0645\u0645\u0646\u0648\u0639\u0629)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P2-07", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const t = await c.getDoc("settings_col", "tier_settings");
+      const b = await c.getDoc("settings_col", "branch_settings");
+      c.check("P2-07", "\u0627\u0644\u062D\u0627\u0644\u0629 \u0645\u0634 403 (200 \u0623\u0648 404 \u0644\u0648 \u0644\u0633\u0647 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634)", { tier: true, branch: true }, { tier: t.status === 200 || t.status === 404, branch: b.status === 200 || b.status === 404 }, `tier ${t.status} | branch ${b.status}`);
+    }
+  },
+  {
+    id: "P2-08",
+    title: "\u062D\u0633\u0627\u0628 \u0645\u0639\u0644\u0651\u0642 \u0623\u0648 \u0645\u0631\u0641\u0648\u0636: \u0645\u0645\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0628\u064A\u0639 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0648\u0627\u0644\u062A\u062C\u0645\u064A\u0639 (H4)",
+    run: async (c) => {
+      if (!c.unapproved) return c.skip("P2-08", "\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647", "\u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0628\u064A\u062A\u0634\u063A\u0651\u0644 \u0628\u062D\u0633\u0627\u0628 \u0645\u0639\u0644\u0651\u0642 \u0623\u0648 \u0645\u0631\u0641\u0648\u0636 \u0628\u0633 (\u0633\u062C\u0651\u0644 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F \u0628\u0625\u064A\u0645\u064A\u0644 \u062A\u0627\u0646\u064A \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u062A\u0639\u062A\u0645\u062F\u0647)");
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const s = c.sale("h4");
+      const saved = await salesStore._attempt("upsert", s);
+      const rows = await fetchSalesInRange(SYS_OLD_TS - 1e3, SYS_OLD_TS + 1e3);
+      const settings = await c.getDoc("settings_col", "invoice_number_settings");
+      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_h4`;
+      const agg = await attemptInvoiceAggregateWrite(day, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", `${SYSTEM_TEST_PREFIX}${c.runId}_h4agg`, 7);
+      if (saved === "ok") c.leftover(`sales_col/${s.id}`, "\u0627\u062A\u0642\u0628\u0644\u062A \u0645\u0646 \u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 \u2014 \u062F\u0647 \u062E\u0644\u0644");
+      c.check("P2-08", "\u0643\u0644 \u0627\u0644\u0639\u0645\u0644\u064A\u0627\u062A \u0627\u062A\u0631\u0641\u0636\u062A", { sale: "drop", read: null, settings: 403, aggregate: "drop" }, { sale: saved, read: rows, settings: settings.status, aggregate: agg });
+    }
+  }
+];
+function sysDeliveryDoc(c, tag, extra) {
+  return c.sale(
+    tag,
+    Object.assign(
+      {
+        fulfillment: "delivery",
+        paid: false,
+        deliveryStatus: "prepared",
+        deliveryArea: "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631",
+        customerPhone: "01000000000",
+        dispatchLocation: null,
+        repName: null,
+        paymentMethod: null,
+        preparedAt: SYS_OLD_TS
+      },
+      extra || {}
+    )
+  );
+}
+async function sysMakeOrder(c, tag, extra) {
+  const doc = sysDeliveryDoc(c, tag, extra);
+  const result = await salesStore._attempt("upsert", doc);
+  c.leftover(`sales_col/${doc.id}`, "\u0623\u0648\u0631\u062F\u0631 \u062A\u0648\u0635\u064A\u0644 \u062A\u062C\u0631\u064A\u0628\u064A (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647)");
+  return { doc, result };
+}
+const sysSendPatch = (extra) => Object.assign({ repName: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631", dispatchLocation: "\u0627\u062E\u062A\u0628\u0627\u0631", sentBy: `${SYSTEM_TEST_PREFIX}sender`, sentAt: SYS_OLD_TS, deliveryStatus: "sent", paid: false, paymentMethod: null, splitTransferMethod: null, cashAmount: null, transferAmount: null, receivedBy: null, receivedAt: null }, extra || {});
+const sysDonePatch = (extra) => Object.assign({ deliveryStatus: "done", paid: true, paymentMethod: "cash", splitTransferMethod: null, cashAmount: null, transferAmount: null, receivedBy: `${SYSTEM_TEST_PREFIX}receiver`, receivedAt: SYS_OLD_TS }, extra || {});
+const sysAdvance = (doc, patch) => Object.assign({}, doc, patch);
+const SYS_PART3_CHECKS = [
+  {
+    id: "P3-01",
+    title: "\u0623\u0648\u0631\u062F\u0631 \u062C\u062F\u064A\u062F \u0632\u064A \u0645\u0627 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0628\u064A\u0639\u0645\u0644\u0647: \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u0648\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u062F\u0648\u0646 \u0645\u0643\u0627\u0646 \u062E\u0631\u0648\u062C (G1/G3)",
+    run: async (c) => {
+      const { doc, result } = await sysMakeOrder(c, "oa");
+      if (result === "ok") c.shared.oa = doc;
+      const g = await c.getDoc("sales_col", doc.id);
+      const d = g.data || {};
+      const back = {
+        fulfillment: d.fulfillment === "delivery",
+        status: d.deliveryStatus === "prepared",
+        unpaid: d.paid === false,
+        area: d.deliveryArea === "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631",
+        phone: d.customerPhone === "01000000000",
+        noDispatch: d.dispatchLocation === null || d.dispatchLocation === void 0,
+        noRep: d.repName === null || d.repName === void 0,
+        noPayment: d.paymentMethod === null || d.paymentMethod === void 0,
+        total: d.total === 7
+      };
+      const allTrue = Object.fromEntries(Object.keys(back).map((k) => [k, true]));
+      c.check("P3-01", "\u0627\u0644\u062D\u0641\u0638 \u062B\u0645 \u0627\u0644\u0642\u0631\u0627\u0621\u0629", { saved: "ok", back: allTrue }, { saved: result, back }, `HTTP ${g.status}`);
+    }
+  },
+  {
+    id: "P3-02",
+    title: "\u0623\u0634\u0643\u0627\u0644 \u0623\u0648\u0631\u062F\u0631 \u063A\u0644\u0637 \u0628\u062A\u062A\u0631\u0641\u0636 \u0644\u0644\u0645\u0648\u0638\u0641: \u0645\u0646 \u063A\u064A\u0631 \u062D\u0627\u0644\u0629\u060C \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0646 \u0627\u0644\u0623\u0648\u0644\u060C \u0646\u0648\u0639 \u0627\u0633\u062A\u0644\u0627\u0645 \u0645\u0634 \u0645\u0639\u0631\u0648\u0641",
+    run: async (c) => {
+      if (c.role === "admin") return c.skip("P3-02", "\u0631\u0641\u0636 \u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "\u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u062A\u062E\u0637\u0649 \u0641\u062D\u0635 \u0627\u0644\u0634\u0643\u0644 (\u0627\u062A\u0623\u0643\u062F\u0646\u0627 \u0641\u064A P1-06) \u2014 \u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 \u0628\u0633");
+      const noStatus = sysDeliveryDoc(c, "bad_nostatus");
+      delete noStatus.deliveryStatus;
+      const cases = [
+        ["\u0645\u0646 \u063A\u064A\u0631 deliveryStatus", noStatus],
+        ["\u062D\u0627\u0644\u0629 done \u0645\u0646 \u0627\u0644\u0623\u0648\u0644", sysDeliveryDoc(c, "bad_done", { deliveryStatus: "done" })],
+        ["\u0646\u0648\u0639 \u0627\u0633\u062A\u0644\u0627\u0645 \u0645\u062C\u0647\u0648\u0644", sysDeliveryDoc(c, "bad_kind", { fulfillment: "courier" })]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, doc] of cases) {
+        const r = await c.putDoc("sales_col", doc.id, doc);
+        const g = await c.getDoc("sales_col", doc.id);
+        actual.push([label, r.ok, g.status]);
+        expected.push([label, false, 404]);
+        if (r.ok) c.leftover(`sales_col/${doc.id}`, `\u0627\u062A\u0642\u0628\u0644 \u0634\u0643\u0644 \u063A\u0644\u0637 (${label}) \u2014 \u062E\u0644\u0644 \u0641\u064A \u0627\u0644\u0642\u0648\u0627\u0639\u062F`);
+      }
+      c.check("P3-02", "\u0643\u0644\u0647\u0645 \u0627\u062A\u0631\u0641\u0636\u0648\u0627 \u0648\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F \u0627\u062A\u0639\u0645\u0644", expected, actual);
+    }
+  },
+  {
+    id: "P3-03",
+    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u0641\u062A\u0648\u062D \u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A) (G5)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a) return c.skip("P3-03", "\u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634 \u0641\u064A \u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647");
+      const rows = await fetchOpenDeliveryOrders();
+      if (rows === null) return c.check("P3-03", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "rows", null, "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644 (\u0645\u0645\u0643\u0646 \u0641\u0647\u0631\u0633 \u0646\u0627\u0642\u0635 \u0623\u0648 \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644)");
+      const mine = rows.find((r) => r.id === a.id);
+      c.check("P3-03", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0644\u064A \u0644\u0633\u0647 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0638\u0627\u0647\u0631", { listed: true, status: "prepared" }, { listed: !!mine, status: mine ? mine.deliveryStatus : null }, `${rows.length} \u0623\u0648\u0631\u062F\u0631 \u0645\u0641\u062A\u0648\u062D \u0641\u064A \u0627\u0644\u0642\u0627\u064A\u0645\u0629`);
+    }
+  },
+  {
+    id: "P3-04",
+    title: "\u0627\u0644\u0623\u0635\u0646\u0627\u0641 \u0648\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0648\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0648\u0627\u0644\u0623\u0633\u0645\u0627\u0621 \u0645\u0627 \u062A\u062A\u063A\u064A\u0631\u0634 \u0628\u0639\u062F \u0627\u0644\u062D\u0641\u0638\u060C \u062D\u062A\u0649 \u0644\u0644\u0623\u062F\u0645\u0646 (G1)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a) return c.skip("P3-04", "\u062D\u0642\u0648\u0644 \u062B\u0627\u0628\u062A\u0629", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634");
+      const attempts = [
+        ["\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A", { total: 8 }],
+        ["\u0627\u0644\u0623\u0635\u0646\u0627\u0641", { items: [{ productName: `${SYSTEM_TEST_PREFIX}other`, unitPrice: 1, qty: 1, lineTotal: 1 }] }],
+        ["\u0627\u0644\u0645\u0646\u0637\u0642\u0629", { deliveryArea: "\u0645\u0646\u0637\u0642\u0629 \u062A\u0627\u0646\u064A\u0629" }],
+        ["\u062A\u0644\u064A\u0641\u0648\u0646 \u0627\u0644\u0632\u0628\u0648\u0646", { customerPhone: "01111111111" }],
+        ["\u0627\u0633\u0645 \u0627\u0644\u0645\u0648\u0638\u0641", { employeeName: `${SYSTEM_TEST_PREFIX}someone_else` }],
+        ["\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", { invoiceNumber: 5 }],
+        ["\u0627\u0633\u0645 \u0627\u0644\u0632\u0628\u0648\u0646", { customerName: "\u0632\u0628\u0648\u0646 \u062A\u0627\u0646\u064A" }],
+        ["\u0648\u0642\u062A \u0627\u0644\u0625\u0646\u0634\u0627\u0621", { createdAt: SYS_OLD_TS + 1e3 }],
+        ["\u0646\u0648\u0639 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0625\u0644\u0649 \u0627\u0633\u062A\u0644\u0627\u0645", { fulfillment: "pickup", paid: true }]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, patch] of attempts) {
+        const r = await c.putDoc("sales_col", a.id, sysAdvance(a, patch));
+        actual.push([label, r.ok]);
+        expected.push([label, false]);
+      }
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      const same = d.total === 7 && d.deliveryArea === "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631" && d.customerPhone === "01000000000" && d.fulfillment === "delivery" && d.deliveryStatus === "prepared" && Array.isArray(d.items) && d.items.length === 1;
+      c.check("P3-04", "\u0643\u0644 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062A\u063A\u064A\u064A\u0631 \u0627\u062A\u0631\u0641\u0636\u062A \u0648\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0632\u064A \u0645\u0627 \u0647\u0648", { attempts: expected, unchanged: true }, { attempts: actual, unchanged: same });
+    }
+  },
+  {
+    id: "P3-05",
+    title: "\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u2190 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0628\u063A\u064A\u0631 \u062F\u0641\u0639: \u0627\u0644\u0645\u0646\u062F\u0648\u0628 \u0648\u0645\u0643\u0627\u0646 \u0627\u0644\u062E\u0631\u0648\u062C \u0628\u064A\u062A\u0633\u062C\u0644\u0648\u0627 (G1/G3)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a) return c.skip("P3-05", "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634");
+      const next = sysAdvance(a, sysSendPatch());
+      const r = await salesStore._attempt("upsert", next);
+      if (r === "ok") c.shared.oa = next;
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      c.check("P3-05", "\u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u062A\u0633\u062C\u0644 \u0648\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0632\u064A \u0645\u0627 \u0647\u0648", { result: "ok", status: "sent", unpaid: true, rep: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631", dispatch: "\u0627\u062E\u062A\u0628\u0627\u0631", total: 7 }, { result: r, status: d.deliveryStatus, unpaid: d.paid === false, rep: d.repName, dispatch: d.dispatchLocation, total: d.total });
+      if (c.role === "employee") c.note("\u0627\u0644\u0645\u0648\u0638\u0641 \u062D\u0631\u0651\u0643 \u0623\u0648\u0631\u062F\u0631 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A: \u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647. \u0627\u0644\u0634\u0627\u0634\u0629 \u0628\u0633 \u0647\u064A \u0627\u0644\u0644\u064A \u0628\u062A\u062E\u0628\u0651\u064A \u0632\u0631\u0627\u0631 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0639\u0646 \u063A\u064A\u0631 \u0635\u0627\u062D\u0628 \u0627\u0644\u0623\u0648\u0631\u062F\u0631.");
+    }
+  },
+  {
+    id: "P3-06",
+    title: "\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u062E\u0644\u0641 \u0645\u0631\u0641\u0648\u0636\u060C \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u064A\u0642\u0641\u0644 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 (G1)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a || a.deliveryStatus !== "sent") return c.skip("P3-06", "\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u062E\u0644\u0641 \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u0627\u062A\u0628\u0639\u062A\xBB");
+      const back = await c.putDoc("sales_col", a.id, sysAdvance(a, { deliveryStatus: "prepared" }));
+      const done = sysAdvance(a, sysDonePatch());
+      const r = await salesStore._attempt("upsert", done);
+      if (r === "ok") c.shared.oa = done;
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      c.check("P3-06", "\u0645\u0646 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0644\u0640\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0645\u0631\u0641\u0648\u0636\u060C \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u064A\u0639\u062F\u0651\u064A \u0648\u064A\u062A\u062E\u0632\u0646 \u0645\u062F\u0641\u0648\u0639", { backRefused: true, receive: "ok", status: "done", paid: true, method: "cash" }, { backRefused: back.ok === false, receive: r, status: d.deliveryStatus, paid: d.paid === true, method: d.paymentMethod });
+    }
+  },
+  {
+    id: "P3-07",
+    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0645\u062A\u062C\u0645\u0651\u062F: \u0644\u0627 \u0631\u062C\u0648\u0639 \u0648\u0644\u0627 \u062A\u063A\u064A\u064A\u0631\u060C \u0648\u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u0646\u0641\u0633 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0645\u0633\u0645\u0648\u062D\u0629 (G1)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a || a.deliveryStatus !== "done") return c.skip("P3-07", "\u062A\u062C\u0645\u064A\u062F \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB");
+      const attempts = [
+        ["\u0631\u062C\u0648\u0639 \u0644\u0640\xAB\u0627\u062A\u0628\u0639\u062A\xBB", { deliveryStatus: "sent" }],
+        ["\u0631\u062C\u0648\u0639 \u0644\u0640\xAB\u0627\u062A\u062C\u0647\u0632\xBB", { deliveryStatus: "prepared" }],
+        ["\u0631\u062C\u0648\u0639 \u0644\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639", { paid: false }],
+        ["\u062A\u063A\u064A\u064A\u0631 \u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u062F\u0641\u0639", { paymentMethod: "instapay" }],
+        ["\u062A\u063A\u064A\u064A\u0631 \u0627\u0633\u0645 \u0627\u0644\u0645\u0646\u062F\u0648\u0628", { repName: "\u0645\u0646\u062F\u0648\u0628 \u062A\u0627\u0646\u064A" }],
+        ["\u062A\u063A\u064A\u064A\u0631 \u0648\u0642\u062A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", { receivedAt: SYS_OLD_TS + 5e3 }]
+      ];
+      const actual = [];
+      const expected = [];
+      for (const [label, patch] of attempts) {
+        const r = await c.putDoc("sales_col", a.id, sysAdvance(a, patch));
+        actual.push([label, r.ok]);
+        expected.push([label, false]);
+      }
+      const same = await c.putDoc("sales_col", a.id, a);
+      const g = await c.getDoc("sales_col", a.id);
+      const d = g.data || {};
+      c.check("P3-07", "\u0643\u0644 \u0627\u0644\u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0627\u062A\u0631\u0641\u0636\u062A\u060C \u0648\u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0645\u0637\u0627\u0628\u0642\u0629 \u0639\u062F\u0651\u062A\u060C \u0648\u0627\u0644\u0645\u062E\u0632\u0651\u0646 \u0632\u064A \u0645\u0627 \u0647\u0648", { attempts: expected, resend: true, status: "done", paid: true, method: "cash", rep: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631" }, { attempts: actual, resend: same.ok, status: d.deliveryStatus, paid: d.paid === true, method: d.paymentMethod, rep: d.repName });
+    }
+  },
+  {
+    id: "P3-08",
+    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0628\u064A\u062E\u062A\u0641\u064A \u0645\u0646 \u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629 (G5)",
+    run: async (c) => {
+      const a = c.shared.oa;
+      if (!a || a.deliveryStatus !== "done") return c.skip("P3-08", "\u0627\u062E\u062A\u0641\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB");
+      const rows = await fetchOpenDeliveryOrders();
+      if (rows === null) return c.check("P3-08", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "rows", null, "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644");
+      c.check("P3-08", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0638\u0627\u0647\u0631 \u0628\u0639\u062F \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 (\u0648\u0642\u062A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0642\u062F\u064A\u0645)", { listed: false }, { listed: rows.some((r) => r.id === a.id) });
+    }
+  },
+  {
+    id: "P3-09",
+    title: "\u0627\u0644\u062F\u0641\u0639 \u0639\u0645\u0631\u0647 \u0645\u0627 \u064A\u0631\u062C\u0639 \xAB\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639\xBB \u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u062A\u0628\u0639\u062A \u0648\u0647\u0648 \u0645\u062F\u0641\u0648\u0639 (\u0627\u0644\u0642\u0627\u0639\u062F\u0629 d.paid == true || o.paid == false)",
+    run: async (c) => {
+      const { doc: b, result } = await sysMakeOrder(c, "ob");
+      if (result !== "ok") return c.check("P3-09", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
+      const sentPaid = sysAdvance(b, sysSendPatch({ paid: true, paymentMethod: "cash" }));
+      const r1 = await salesStore._attempt("upsert", sentPaid);
+      const unpay = await c.putDoc("sales_col", b.id, sysAdvance(sentPaid, { paid: false, paymentMethod: null }));
+      const finish = sysAdvance(sentPaid, sysDonePatch());
+      const r3 = await salesStore._attempt("upsert", finish);
+      c.check("P3-09", "\u0625\u0631\u0633\u0627\u0644 \u0645\u062F\u0641\u0648\u0639 \u062B\u0645 \u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u062D\u0648\u064A\u0644\u0647 \u0644\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u062B\u0645 \u0625\u0646\u0647\u0627\u0624\u0647", { sentPaid: "ok", unpayRefused: true, finish: "ok" }, { sentPaid: r1, unpayRefused: unpay.ok === false, finish: r3 });
+      if (r3 !== "ok") c.leftover(`sales_col/${b.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
+    }
+  },
+  {
+    id: "P3-10",
+    title: "\u0645\u062F\u0641\u0648\u0639 \u0645\u0642\u062F\u0645\u064B\u0627 \u0648\u0642\u062A \u0627\u0644\u0625\u0631\u0633\u0627\u0644 (\u062F\u0641\u0639 \u0645\u0642\u0633\u0651\u0645): \u0628\u064A\u0631\u0648\u062D \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0639\u0644\u0649 \u0637\u0648\u0644 \u0648\u0627\u0644\u0645\u0628\u0627\u0644\u063A \u0628\u062A\u062A\u062E\u0632\u0646 (G1)",
+    run: async (c) => {
+      const { doc: o, result } = await sysMakeOrder(c, "oc");
+      if (result !== "ok") return c.check("P3-10", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
+      const done = sysAdvance(o, sysSendPatch(sysDonePatch({ paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: 3, transferAmount: 4 })));
+      const r = await salesStore._attempt("upsert", done);
+      const g = await c.getDoc("sales_col", o.id);
+      const d = g.data || {};
+      c.check("P3-10", "\u0627\u0644\u062D\u0641\u0638 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629", { result: "ok", status: "done", paid: true, split: true }, { result: r, status: d.deliveryStatus, paid: d.paid === true, split: d.paymentMethod === "split" && d.splitTransferMethod === "instapay" && d.cashAmount === 3 && d.transferAmount === 4 && d.cashAmount + d.transferAmount === d.total });
+      if (r !== "ok") c.leftover(`sales_col/${o.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
+    }
+  },
+  {
+    id: "P3-11",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0623\u0648\u0631\u062F\u0631 \u064A\u062A\u0642\u0641\u0644 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u064A\u062A\u062F\u0641\u0639",
+    run: async (c) => {
+      const { doc: o, result } = await sysMakeOrder(c, "od");
+      if (result !== "ok") return c.check("P3-11", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
+      const r = await c.putDoc("sales_col", o.id, sysAdvance(o, sysDonePatch({ paid: false, paymentMethod: null, receivedBy: null })));
+      const g = await c.getDoc("sales_col", o.id);
+      const d = g.data || {};
+      c.check("P3-11", "\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u064A\u062A\u0631\u0641\u0636 (\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0644\u0627\u0632\u0645 \u064A\u0643\u0648\u0646 \u0645\u062F\u0641\u0648\u0639)", { accepted: false }, { accepted: r.ok === true && d.deliveryStatus === "done" && d.paid === false }, r.ok ? "\u0627\u062A\u0642\u0628\u0644: \u0627\u0644\u0642\u0627\u0639\u062F\u0629 d.paid == true || o.paid == false \u0628\u062A\u0633\u0645\u062D \u0628\u0623\u0648\u0631\u062F\u0631 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639. \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0646\u0641\u0633\u0647 \u0645\u0627 \u0628\u064A\u0639\u0645\u0644\u0634 \u0643\u062F\u0647\u060C \u0644\u0643\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0628\u064A\u0633\u0645\u062D." : "");
+      if (r.ok) c.note("\u0644\u0648 \u062F\u0647 \u0627\u062A\u0642\u0628\u0644\u060C \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0628\u064A\u062A\u0642\u0641\u0644 \u0646\u0647\u0627\u0626\u064A\u064B\u0627 \u0648\u0647\u0648 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0648\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0633\u0628 \u0641\u064A \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631. \u0627\u0644\u062D\u0644 \u0627\u0644\u0645\u0642\u062A\u0631\u062D \u062A\u0639\u062F\u064A\u0644 \u0641\u064A firestore.rules (\u0645\u0627 \u0627\u062A\u0639\u0645\u0644\u0634).");
+      else c.leftover(`sales_col/${o.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
+    }
+  },
+  {
+    id: "P3-12",
+    title: "\u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0627 \u0628\u064A\u062A\u062D\u0642\u0642\u0634 \u0645\u0646 \u0627\u0644\u0623\u0633\u0639\u0627\u0631: \u0625\u062C\u0645\u0627\u0644\u064A \u0635\u0641\u0631 \u0648\u0625\u062C\u0645\u0627\u0644\u064A \u0645\u0634 \u0645\u0637\u0627\u0628\u0642 \u0644\u0644\u0623\u0635\u0646\u0627\u0641 \u0628\u064A\u062A\u0642\u0628\u0644\u0648\u0627 (H6)",
+    run: async (c) => {
+      if (c.unapproved) return c.skip("P3-12", "\u0623\u0633\u0639\u0627\u0631 \u063A\u0631\u064A\u0628\u0629", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
+      const zero = c.sale("p_zero", { total: 0, items: [{ productName: `${SYSTEM_TEST_PREFIX}item`, unitPrice: 0, qty: 1, lineTotal: 0 }] });
+      const mismatch = c.sale("p_mismatch", { total: 99 });
+      const rz = await salesStore._attempt("upsert", zero);
+      const rm = await salesStore._attempt("upsert", mismatch);
+      c.leftover(`sales_col/${zero.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0625\u062C\u0645\u0627\u0644\u064A \u0635\u0641\u0631");
+      c.leftover(`sales_col/${mismatch.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0625\u062C\u0645\u0627\u0644\u064A \u0645\u0634 \u0645\u0637\u0627\u0628\u0642 \u0644\u0644\u0623\u0635\u0646\u0627\u0641");
+      c.check("P3-12", "\u0627\u062A\u0642\u0628\u0644\u0648\u0627 \u0627\u0644\u0627\u062A\u0646\u064A\u0646 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u062A\u0623\u0643\u062F \u0625\u0646 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0631\u0642\u0645 \u0645\u0648\u062C\u0628 \u0628\u0633)", { zeroTotal: "ok", totalMismatch: "ok" }, { zeroTotal: rz, totalMismatch: rm });
+      c.note("\u064A\u0639\u0646\u064A \u0627\u0644\u062D\u0645\u0627\u064A\u0629 \u0627\u0644\u0648\u062D\u064A\u062F\u0629 \u0644\u0644\u0623\u0633\u0639\u0627\u0631 \u0647\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0646\u0641\u0633\u0647\u0627. \u0644\u0648 \u0627\u0644\u0636\u063A\u0637 \u0627\u0644\u0645\u0637\u0648\u0651\u0644 \u0639\u0644\u0649 \u0633\u0639\u0631 \u0627\u0644\u0633\u0637\u0631 (A14) \u0641\u0639\u0644\u064B\u0627 \u0628\u064A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u064A\u063A\u064A\u0651\u0631 \u0627\u0644\u0633\u0639\u0631\u060C \u064A\u0628\u0642\u0649 \u0645\u0641\u064A\u0634 \u062D\u0627\u062C\u0629 \u062A\u0645\u0646\u0639\u0647 \u064A\u0628\u064A\u0639 \u0628\u0635\u0641\u0631. A14 \u0644\u0633\u0647 \u0645\u062D\u062A\u0627\u062C \u0641\u062D\u0635 \u0645\u0646\u0641\u0635\u0644.");
+    }
+  },
+  {
+    id: "P3-13",
+    title: "\u062A\u0644\u064A\u0641\u0648\u0646 \u0627\u0644\u0632\u0628\u0648\u0646: \u0661\u0661 \u0631\u0642\u0645 \u064A\u0628\u062F\u0623 \u0628\u0640010/011/012/015\u060C \u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629 \u0648\u0645\u0633\u0627\u0641\u0627\u062A \u0648\u0634\u0631\u0637\u0627\u062A \u0645\u0642\u0628\u0648\u0644\u0629 (G2)",
+    run: async (c) => {
+      const ok = (s) => validateEgyptPhone(s) === null;
+      const valid = ["01012345678", "010 1234 5678", "010-1234-5678", "\u0660\u0661\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668", "01512345678"];
+      const invalid = ["0101234567", "010123456789", "01312345678", "01412345678", "01612345678", "01912345678", "", "abc", "+201012345678"];
+      c.check("P3-13", "\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0627\u0644\u0635\u062D\u064A\u062D\u0629 \u0628\u062A\u0639\u062F\u0651\u064A \u0648\u0627\u0644\u063A\u0644\u0637 \u0628\u064A\u062A\u0631\u0641\u0636", { valid: valid.map(() => true), invalid: invalid.map(() => false) }, { valid: valid.map(ok), invalid: invalid.map(ok) });
+      c.note("\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0644\u064A \u0628\u064A\u0628\u062F\u0623 \u0628\u0640+20 \u0628\u064A\u062A\u0631\u0641\u0636 (\u0661\u0662 \u0631\u0642\u0645 \u0628\u0639\u062F \u0634\u064A\u0644 \u0627\u0644\u0639\u0644\u0627\u0645\u0627\u062A). \u0644\u0648 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u0628\u064A\u0644\u0635\u0642\u0648\u0627 \u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0643\u062F\u0647\u060C \u0645\u0645\u0643\u0646 \u0646\u0642\u0628\u0644\u0647 \u0648\u0646\u0634\u064A\u0644 20.");
+    }
+  },
+  {
+    id: "P3-14",
+    title: "\u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u062F\u0641\u0639 \u0639\u0646\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645: \u062F\u0641\u0639 \u0645\u0642\u0633\u0651\u0645 (G4)",
+    run: async (c) => {
+      const v = (pm, price) => validatePaymentMethod(pm, price) === null;
+      const cases = [
+        ["\u0645\u0646 \u063A\u064A\u0631 \u0637\u0631\u064A\u0642\u0629", { paymentMethod: "" }, 7, false],
+        ["\u0643\u0627\u0634", { paymentMethod: "cash" }, 7, true],
+        ["\u0641\u0648\u062F\u0627\u0641\u0648\u0646 \u0643\u0627\u0634", { paymentMethod: "vodafone_cash" }, 7, true],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0645\u0646 \u063A\u064A\u0631 \u0648\u0633\u064A\u0644\u0629 \u062A\u062D\u0648\u064A\u0644", { paymentMethod: "split", splitTransferMethod: "", cashAmount: "3", transferAmount: "4" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0628\u0645\u0628\u0627\u0644\u063A \u0641\u0627\u0636\u064A\u0629", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "", transferAmount: "" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0645\u062C\u0645\u0648\u0639\u0647 \u0623\u0642\u0644", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "3" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0641\u0631\u0642 \u0660\u066B\u0660\u0662", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "4.02" }, 7, false],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0641\u0631\u0642 \u0660\u066B\u0660\u0660\u0665", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "4.005" }, 7, true],
+        ["\u0645\u0642\u0633\u0651\u0645 \u0628\u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629", { paymentMethod: "split", splitTransferMethod: "vodafone_cash", cashAmount: "\u0663", transferAmount: "\u0664" }, 7, true]
+      ];
+      c.check("P3-14", "\u0643\u0644 \u062D\u0627\u0644\u0629 \u0628\u062A\u062F\u064A\u0643 \u0627\u0644\u0631\u062F \u0627\u0644\u0645\u062A\u0648\u0642\u0639", cases.map((x) => [x[0], x[3]]), cases.map((x) => [x[0], v(x[1], x[2])]));
+    }
+  },
+  {
+    id: "P3-M1",
+    title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u062A\u0648\u0635\u064A\u0644",
+    run: async (c) => {
+      c.skip("P3-M1a", "\u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0641\u0627\u0636\u064A\u0629 \u0641\u064A \u0646\u0627\u0641\u0630\u0629 \u0627\u0644\u062F\u0641\u0639 (\u062F\u0644\u064A\u0641\u0631\u064A)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0643\u062A\u0628 \u0623\u0648\u0631\u062F\u0631 \u0645\u0646 \u063A\u064A\u0631 \u0645\u0646\u0637\u0642\u0629\u060C \u0644\u0627\u0632\u0645 \u062A\u0638\u0647\u0631 \xAB\u0627\u0643\u062A\u0628 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0623\u0648 \u0627\u0633\u0645 \u0627\u0644\u0645\u062D\u0644\xBB \u0648\u0645\u0627\u064A\u062A\u062D\u0641\u0638\u0634");
+      c.skip("P3-M1b", "\u062A\u0628\u0648\u064A\u0628 \xAB\u0623\u0648\u0631\u062F\u0631\u0627\u062A\u064A\xBB \u0644\u0644\u0645\u0648\u0638\u0641", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0639\u0645\u0644 \u0623\u0648\u0631\u062F\u0631 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0648\u062A\u0623\u0643\u062F \u0625\u0646\u0647 \u0628\u064A\u0638\u0647\u0631 \u0639\u0646\u062F\u0647\u060C \u0648\u0625\u0646 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0645\u0646 \u063A\u064A\u0631 \u0635\u0644\u0627\u062D\u064A\u0629 viewAllOrders \u0645\u0627 \u0628\u064A\u0634\u0648\u0641\u0648\u0634 \u0641\u064A \xAB\u0623\u0648\u0631\u062F\u0631\u0627\u062A\u064A\xBB");
+      c.skip("P3-M1c", "\u0632\u0631\u0627\u0631 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0635\u0627\u062D\u0628 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0628\u0633", "\u270B \u064A\u062F\u0648\u064A: \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u064A\u0641\u062A\u062D \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u060C \u0644\u0627\u0632\u0645 \u064A\u0644\u0627\u0642\u064A \xAB\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644\xBB \u0645\u062E\u0641\u064A (\u0627\u0644\u0634\u0627\u0634\u0629 \u0628\u0633 \u0647\u064A \u0627\u0644\u0644\u064A \u0628\u062A\u0645\u0646\u0639)");
+      c.skip("P3-M1d", "\u062A\u062D\u0630\u064A\u0631\u0627\u062A \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0639\u0644\u0649 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 (G4)", "\u270B \u064A\u062F\u0648\u064A: \u0646\u0641\u0633 \u062A\u062D\u0630\u064A\u0631\u0627\u062A \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0627\u0644\u0623\u0635\u0641\u0631 \u0641\u064A \u0627\u0644\u062F\u0644\u064A\u0641\u0631\u064A \u0632\u064A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645");
+    }
+  }
+];
+const sysSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function sysFakeResponse(status) {
+  return Promise.resolve(new Response(JSON.stringify({ error: { status: "INJECTED", message: `injected ${status}` } }), { status, headers: { "Content-Type": "application/json" } }));
+}
+function sysInstallFault(needle, handler) {
+  const real = globalThis.fetch;
+  const log = [];
+  const wrapped = function(input, init) {
+    const url = typeof input === "string" ? input : input && input.url || String(input);
+    const body = init && typeof init.body === "string" ? init.body : "";
+    if (!url.includes(needle) && !body.includes(needle)) return real.apply(this, arguments);
+    const method = init && init.method || "GET";
+    const n = log.length;
+    log.push({ url, method });
+    const self = this;
+    const args = arguments;
+    const out = handler({ url, method, n, passthrough: () => real.apply(self, args) });
+    return out === void 0 ? real.apply(this, arguments) : out;
+  };
+  globalThis.fetch = wrapped;
+  return { log, restore: () => {
+    if (globalThis.fetch === wrapped) globalThis.fetch = real;
+  } };
+}
+function sysFillQueueStorage() {
+  const proto = typeof Storage !== "undefined" && Storage.prototype && typeof Storage.prototype.setItem === "function" ? Storage.prototype : null;
+  const target = proto || localStorage;
+  const real = target.setItem;
+  target.setItem = function(k) {
+    if (k === OFFLINE_QUEUE_KEY) throw new Error("QuotaExceededError");
+    return real.apply(this, arguments);
+  };
+  return { restore: () => {
+    target.setItem = real;
+  } };
+}
+const sysTestPrefix = (c) => `${SYSTEM_TEST_PREFIX}${c.runId}`;
+const sysQueuedOps = (c) => getOfflineQueue().filter((op) => op.collectionName === "sales_col" && op.payload && String(op.payload.id || "").startsWith(sysTestPrefix(c)));
+const sysQueuedCount = (c, id) => sysQueuedOps(c).filter((op) => op.payload.id === id).length;
+function sysDropQueued(c) {
+  setOfflineQueueRaw(getOfflineQueue().filter((op) => !(op.collectionName === "sales_col" && op.payload && String(op.payload.id || "").startsWith(sysTestPrefix(c)))));
+  notifyQueueChange();
+}
+async function sysSyncNow() {
+  const t0 = Date.now();
+  while (syncingOfflineQueue && Date.now() - t0 < 8e3) await sysSleep(50);
+  await syncOfflineQueue();
+}
+const sysPatches = (spy) => spy.log.filter((x) => x.method === "PATCH").length;
+const SYS_PART4_CHECKS = [
+  {
+    id: "P4-01",
+    title: "\u062E\u0637\u0623 \u0645\u0624\u0642\u062A \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 (503/500/429/408): \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062A\u062D\u0641\u0638 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0648\u062A\u062A\u0628\u0639\u062A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0644\u0645\u0627 \u064A\u0631\u062C\u0639 (F2/F4)",
+    run: async (c) => {
+      const actual = [];
+      const expected = [];
+      for (const code of [503, 500, 429, 408]) {
+        const doc = c.sale(`q${code}`);
+        c.leftover(`sales_col/${doc.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+        const fault = sysInstallFault(doc.id, () => sysFakeResponse(code));
+        let returned;
+        let queued;
+        try {
+          returned = await salesStore.upsert(doc);
+          queued = sysQueuedCount(c, doc.id);
+        } finally {
+          fault.restore();
+        }
+        const spy = sysInstallFault(doc.id, () => void 0);
+        try {
+          await sysSyncNow();
+        } finally {
+          spy.restore();
+        }
+        const g = await c.getDoc("sales_col", doc.id);
+        actual.push([code, returned, queued, !!g.data, sysQueuedCount(c, doc.id), sysPatches(spy)]);
+        expected.push([code, false, 1, true, 0, 1]);
+      }
+      sysDropQueued(c);
+      c.check("P4-01", "[\u0627\u0644\u0643\u0648\u062F\u060C \u0631\u062C\u0651\u0639 \u062D\u0641\u0638\u061F\u060C \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631\u060C \u0627\u062A\u062D\u0641\u0638\u062A \u0628\u0639\u062F \u0627\u0644\u0631\u062C\u0648\u0639\u060C \u0644\u0633\u0647 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631\u060C \u0639\u062F\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644]", expected, actual);
+    }
+  },
+  {
+    id: "P4-02",
+    title: "\u0631\u0641\u0636 \u062F\u0627\u0626\u0645 \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 (400/403/404): \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0628\u062A\u062A\u062D\u0637\u0634 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 (F3)",
+    run: async (c) => {
+      const actual = [];
+      const expected = [];
+      for (const code of [400, 403, 404]) {
+        const doc = c.sale(`d${code}`);
+        const fault = sysInstallFault(doc.id, () => sysFakeResponse(code));
+        let returned;
+        try {
+          returned = await salesStore.upsert(doc);
+        } finally {
+          fault.restore();
+        }
+        const g = await c.getDoc("sales_col", doc.id);
+        actual.push([code, returned, sysQueuedCount(c, doc.id), !!g.data]);
+        expected.push([code, false, 0, false]);
+      }
+      sysDropQueued(c);
+      c.check("P4-02", "[\u0627\u0644\u0643\u0648\u062F\u060C \u0631\u062C\u0651\u0639 \u062D\u0641\u0638\u061F\u060C \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631\u060C \u0645\u0648\u062C\u0648\u062F\u0629 \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631]", expected, actual);
+    }
+  },
+  {
+    id: "P4-03",
+    title: "\u0642\u0637\u0639 \u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A \u0648\u0642\u062A \u0627\u0644\u0628\u064A\u0639: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0648\u0628\u062A\u062A\u0628\u0639\u062A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0639\u062F \u0627\u0644\u0631\u062C\u0648\u0639 (F1)",
+    run: async (c) => {
+      const doc = c.sale("net");
+      c.leftover(`sales_col/${doc.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const fault = sysInstallFault(doc.id, () => Promise.reject(new TypeError("Failed to fetch")));
+      let returned;
+      let queued;
+      try {
+        returned = await salesStore.upsert(doc);
+        queued = sysQueuedCount(c, doc.id);
+      } finally {
+        fault.restore();
+      }
+      const spy = sysInstallFault(doc.id, () => void 0);
+      try {
+        await sysSyncNow();
+      } finally {
+        spy.restore();
+      }
+      const g = await c.getDoc("sales_col", doc.id);
+      sysDropQueued(c);
+      c.check("P4-03", "\u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u062B\u0645 \u0627\u0644\u0625\u0631\u0633\u0627\u0644", { returned: false, queued: 1, saved: true, patches: 1 }, { returned, queued, saved: !!g.data, patches: sysPatches(spy) });
+    }
+  },
+  {
+    id: "P4-04",
+    title: "\u0645\u0632\u0627\u0645\u0646\u062A\u064A\u0646 \u0641\u064A \u0646\u0641\u0633 \u0627\u0644\u0644\u062D\u0638\u0629 \u062B\u0645 \u0645\u0632\u0627\u0645\u0646\u0629 \u062A\u0627\u0644\u062A\u0629: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0628\u062A\u062A\u0628\u0639\u062A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 (F1)",
+    run: async (c) => {
+      const doc = c.sale("once");
+      c.leftover(`sales_col/${doc.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const fault = sysInstallFault(doc.id, () => sysFakeResponse(503));
+      try {
+        await salesStore.upsert(doc);
+      } finally {
+        fault.restore();
+      }
+      const spy = sysInstallFault(doc.id, () => void 0);
+      try {
+        const t0 = Date.now();
+        while (syncingOfflineQueue && Date.now() - t0 < 8e3) await sysSleep(50);
+        await Promise.all([syncOfflineQueue(), syncOfflineQueue()]);
+        await sysSyncNow();
+        await sysSyncNow();
+      } finally {
+        spy.restore();
+      }
+      const g = await c.getDoc("sales_col", doc.id);
+      sysDropQueued(c);
+      c.check("P4-04", "\u0639\u062F\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0643\u0644\u064A", { saved: true, patches: 1, left: 0 }, { saved: !!g.data, patches: sysPatches(spy), left: sysQueuedCount(c, doc.id) });
+    }
+  },
+  {
+    id: "P4-05",
+    title: "\u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u062A\u062D\u0637\u062A \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0648\u0642\u062A \u0645\u0627 \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0634\u063A\u0627\u0644\u0629: \u0645\u0627 \u0628\u062A\u0636\u064A\u0639\u0634 (F4)",
+    run: async (c) => {
+      const d1 = c.sale("mid1");
+      const d2 = c.sale("mid2");
+      c.leftover(`sales_col/${d1.id} \u0648 ${d2.id}`, "\u0641\u0648\u0627\u062A\u064A\u0631 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const fault = sysInstallFault(d1.id, () => sysFakeResponse(503));
+      try {
+        await salesStore.upsert(d1);
+      } finally {
+        fault.restore();
+      }
+      const slow = sysInstallFault(d1.id, ({ method, n, passthrough }) => method === "PATCH" && n === 0 ? new Promise((r) => setTimeout(() => r(passthrough()), 500)) : void 0);
+      let during;
+      try {
+        const t0 = Date.now();
+        while (syncingOfflineQueue && Date.now() - t0 < 8e3) await sysSleep(50);
+        const running = syncOfflineQueue();
+        await sysSleep(150);
+        queueOfflineOp("sales_col", "upsert", d2);
+        during = sysQueuedCount(c, d2.id);
+        await running;
+      } finally {
+        slow.restore();
+      }
+      const first = { d1Saved: !!(await c.getDoc("sales_col", d1.id)).data, d2StillQueued: sysQueuedCount(c, d2.id), d2OnServer: !!(await c.getDoc("sales_col", d2.id)).data };
+      await sysSyncNow();
+      const second = { d2Saved: !!(await c.getDoc("sales_col", d2.id)).data, left: sysQueuedOps(c).length };
+      sysDropQueued(c);
+      c.check("P4-05", "\u0627\u0644\u0644\u064A \u0627\u062A\u0636\u0627\u0641 \u0623\u062B\u0646\u0627\u0621 \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0641\u0636\u0644 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0648\u0627\u062A\u0628\u0639\u062A \u0628\u0639\u062F\u0647\u0627", { during: 1, first: { d1Saved: true, d2StillQueued: 1, d2OnServer: false }, second: { d2Saved: true, left: 0 } }, { during, first, second });
+    }
+  },
+  {
+    id: "P4-06",
+    title: "\u0637\u0627\u0628\u0648\u0631 \u0641\u064A\u0647 \u0663 \u0639\u0645\u0644\u064A\u0627\u062A: \u0648\u0627\u062D\u062F\u0629 \u0628\u062A\u0641\u0634\u0644 \u0645\u0624\u0642\u062A\u064B\u0627 (\u062A\u0641\u0636\u0644)\u060C \u0648\u0627\u062D\u062F\u0629 \u062A\u0639\u062F\u0651\u064A\u060C \u0648\u0627\u062D\u062F\u0629 \u0645\u0631\u0641\u0648\u0636\u0629 \u0646\u0647\u0627\u0626\u064A (\u0628\u062A\u062A\u0645\u0633\u062D) (F2/F3)",
+    run: async (c) => {
+      const a = c.sale("ma");
+      const b = c.sale("mb");
+      const cc = c.sale("mc");
+      c.leftover(`sales_col/${a.id}, ${b.id}`, "\u0641\u0648\u0627\u062A\u064A\u0631 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      [a, b, cc].forEach((d) => queueOfflineOp("sales_col", "upsert", d));
+      const fault = sysInstallFault(`${sysTestPrefix(c)}_m`, ({ url, passthrough }) => url.includes("_ma") ? sysFakeResponse(503) : url.includes("_mc") ? sysFakeResponse(403) : passthrough());
+      try {
+        await sysSyncNow();
+      } finally {
+        fault.restore();
+      }
+      const after = {
+        queueIds: sysQueuedOps(c).map((o) => o.payload.id.slice(-3)),
+        aOnServer: !!(await c.getDoc("sales_col", a.id)).data,
+        bOnServer: !!(await c.getDoc("sales_col", b.id)).data,
+        cOnServer: !!(await c.getDoc("sales_col", cc.id)).data
+      };
+      const spy = sysInstallFault(a.id, () => void 0);
+      try {
+        await sysSyncNow();
+      } finally {
+        spy.restore();
+      }
+      const final = { aSaved: !!(await c.getDoc("sales_col", a.id)).data, left: sysQueuedOps(c).length };
+      sysDropQueued(c);
+      c.check("P4-06", "\u0628\u0639\u062F \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0627\u0644\u0623\u0648\u0644\u0649 \u0648\u0628\u0639\u062F \u0631\u062C\u0648\u0639 \u0627\u0644\u0633\u064A\u0631\u0641\u0631", { after: { queueIds: ["_ma"], aOnServer: false, bOnServer: true, cOnServer: false }, final: { aSaved: true, left: 0 } }, { after, final });
+    }
+  },
+  {
+    id: "P4-07",
+    title: "\u062A\u0648\u0643\u0646 \u0645\u0631\u0641\u0648\u0636 (401): \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u064A\u062C\u062F\u062F \u0627\u0644\u062C\u0644\u0633\u0629 \u0648\u064A\u0639\u064A\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0648\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062A\u062D\u0641\u0638 (\u0641\u0643\u0633 #61 / A3)",
+    run: async (c) => {
+      const doc = c.sale("tok");
+      const saved = authState;
+      let status = null;
+      const spy = sysInstallFault(doc.id, ({ passthrough }) => passthrough().then((r) => {
+        status = r.status;
+        return r;
+      }));
+      authState = { idToken: "x.y.z", refreshToken: saved.refreshToken, expiresAt: Date.now() + 6e5 };
+      let result;
+      try {
+        result = await salesStore._attempt("upsert", doc);
+      } finally {
+        authState = saved;
+        spy.restore();
+      }
+      const g = await c.getDoc("sales_col", doc.id);
+      if (g.data) c.leftover(`sales_col/${doc.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      c.check("P4-07", "\u0646\u062A\u064A\u062C\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0628\u062A\u0648\u0643\u0646 \u0645\u0631\u0641\u0648\u0636 (\u0628\u0639\u062F \u062A\u062C\u062F\u064A\u062F \u0627\u0644\u062C\u0644\u0633\u0629)", "ok", result, `\u0622\u062E\u0631 \u0631\u062F \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631: HTTP ${status}${result === "drop" ? " \u2014 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0635\u0646\u0651\u0641\u0647 \u0631\u0641\u0636 \u062F\u0627\u0626\u0645\u060C \u0641\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0641\u064A \u0637\u0627\u0628\u0648\u0631 \u0627\u0644\u0645\u0632\u0627\u0645\u0646\u0629 \u0643\u0627\u0646\u062A \u0647\u062A\u062A\u0645\u0633\u062D (\u062F\u0647 \u0628\u064A\u062D\u0635\u0644 \u0644\u0648 \u0633\u0627\u0639\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u063A\u0644\u0637 \u0641\u0627\u0644\u062A\u0648\u0643\u0646 \u0627\u0644\u0645\u0646\u062A\u0647\u064A \u064A\u062A\u0639\u0627\u0645\u0644 \u0643\u0623\u0646\u0647 \u0633\u0644\u064A\u0645)." : result === "retry" ? " \u2014 \u0627\u0644\u062A\u062C\u062F\u064A\u062F \u0645\u0627 \u0646\u0641\u0639\u0634\u060C \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0647\u062A\u0641\u0636\u0644 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 (\u0645\u0634 \u0647\u062A\u062A\u0645\u0633\u062D)." : ""}`);
+      c.check("P4-07", "\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0648\u0635\u0644\u062A \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0641\u0639\u0644\u064B\u0627", true, !!g.data);
+    }
+  },
+  {
+    id: "P4-08",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0644\u0648 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0627 \u0631\u062F\u0651\u0634 \u062E\u0627\u0644\u0635\u060C \u0627\u0644\u062D\u0641\u0638 \u0644\u0627\u0632\u0645 \u064A\u062A\u0648\u0642\u0641 \u0628\u0639\u062F \u0648\u0642\u062A \u0645\u0639\u0642\u0648\u0644 (F8)",
+    run: async (c) => {
+      const doc = c.sale("hang");
+      let settled = false;
+      const spy = sysInstallFault(doc.id, () => new Promise(() => {
+      }));
+      salesStore._attempt("upsert", doc).then(() => {
+        settled = true;
+      });
+      await sysSleep(6e3);
+      spy.restore();
+      c.check("P4-08", "\u0627\u0644\u062D\u0641\u0638 \u062E\u0644\u0651\u0635 \u062E\u0644\u0627\u0644 \u0666 \u062B\u0648\u0627\u0646\u064A\u061F", { settledWithin6s: true }, { settledWithin6s: settled }, settled ? "" : "\u0645\u0641\u064A\u0634 \u0645\u0647\u0644\u0629 \u0639\u0644\u0649 \u0627\u0644\u0643\u062A\u0627\u0628\u0629: \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0647\u064A\u0641\u0636\u0644 \xAB\u062C\u0627\u0631\u064A \u0627\u0644\u062D\u0641\u0638\xBB \u0644\u062D\u062F \u0645\u0627 \u0627\u0644\u0645\u062A\u0635\u0641\u062D \u064A\u0633\u062A\u0633\u0644\u0645 (\u0645\u0645\u0643\u0646 \u062F\u0642\u0627\u064A\u0642)\u060C \u0648\u0645\u0634 \u0628\u064A\u0631\u0648\u062D \u0644\u0644\u0637\u0627\u0628\u0648\u0631.");
+    }
+  },
+  {
+    id: "P4-09",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0644\u0648 \u062D\u062C\u0632 \u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0639\u0644\u0651\u0642\u060C \u0627\u0644\u0632\u0631\u0627\u0631 \u0644\u0627\u0632\u0645 \u064A\u0643\u0645\u0651\u0644 \u0628\u0631\u0642\u0645 \u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0628\u0639\u062F \u0648\u0642\u062A \u0645\u0639\u0642\u0648\u0644 (D5/F6)",
+    run: async (c) => {
+      let settled = false;
+      const spy = sysInstallFault("invoice_number_settings", () => new Promise(() => {
+      }));
+      claimNextInvoiceNumber(Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS, { nextNumber: 7 })).then(() => {
+        settled = true;
+      });
+      await sysSleep(6e3);
+      spy.restore();
+      c.check("P4-09", "\u0627\u0644\u062D\u062C\u0632 \u0631\u062C\u0651\u0639 \u0631\u0642\u0645 \u062E\u0644\u0627\u0644 \u0666 \u062B\u0648\u0627\u0646\u064A\u061F", { settledWithin6s: true }, { settledWithin6s: settled }, settled ? "" : "\u0645\u0641\u064A\u0634 \u0645\u0647\u0644\u0629 \u0639\u0644\u0649 \u062D\u062C\u0632 \u0627\u0644\u0631\u0642\u0645: \xAB\u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629\xBB \u0645\u0645\u0643\u0646 \u062A\u0641\u0636\u0644 \u0645\u0633\u062A\u0646\u064A\u0629.");
+    }
+  },
+  {
+    id: "P4-10",
+    title: "\u062D\u062C\u0632 \u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0644\u0645\u0627 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0628\u064A\u0641\u0634\u0644: \u0631\u0642\u0645 \u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0645\u0646 \u0627\u0644\u062C\u0647\u0627\u0632 \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u0627\u0644\u0639\u062F\u0627\u062F \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u064A\u062A\u0644\u0645\u0633 (D4/D5)",
+    run: async (c) => {
+      const fb = Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS, { nextNumber: 7 });
+      const cases = [
+        ["\u0642\u0631\u0627\u0621\u0629 500", ({ method }) => method === "GET" ? sysFakeResponse(500) : sysFakeResponse(500)],
+        ["\u0642\u0631\u0627\u0621\u0629 403", () => sysFakeResponse(403)],
+        ["\u0645\u0641\u064A\u0634 \u0625\u0646\u062A\u0631\u0646\u062A", () => Promise.reject(new TypeError("Failed to fetch"))],
+        ["\u0627\u0644\u0643\u062A\u0627\u0628\u0629 500 \u062F\u0627\u064A\u0645\u064B\u0627", ({ method }) => method === "GET" ? sysFakeResponse(404) : sysFakeResponse(500)]
+      ];
+      const actual = [];
+      for (const [label, handler] of cases) {
+        const spy = sysInstallFault("invoice_number_settings", handler);
+        let r;
+        try {
+          r = await claimNextInvoiceNumber(fb);
+        } finally {
+          spy.restore();
+        }
+        actual.push([label, r.number, r.updatedSettings.nextNumber, spy.log.filter((x) => x.method === "PATCH").length]);
+      }
+      c.check("P4-10", "[\u0627\u0644\u062D\u0627\u0644\u0629\u060C \u0627\u0644\u0631\u0642\u0645\u060C \u0627\u0644\u0639\u062F\u0627\u062F \u0627\u0644\u062C\u062F\u064A\u062F \u0627\u0644\u0645\u062D\u0644\u064A\u060C \u0639\u062F\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u0643\u062A\u0627\u0628\u0629]", [["\u0642\u0631\u0627\u0621\u0629 500", 7, 8, 0], ["\u0642\u0631\u0627\u0621\u0629 403", 7, 8, 0], ["\u0645\u0641\u064A\u0634 \u0625\u0646\u062A\u0631\u0646\u062A", 7, 8, 0], ["\u0627\u0644\u0643\u062A\u0627\u0628\u0629 500 \u062F\u0627\u064A\u0645\u064B\u0627", 7, 8, 6]], actual);
+      c.note(`\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0628\u064A\u0628\u062F\u0623 \u0645\u0646 \u0622\u062E\u0631 \u0639\u062F\u0651\u0627\u062F \u0627\u0644\u062C\u0647\u0627\u0632 \u0639\u0627\u0631\u0641\u0647. \u0644\u0648 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0627\u062A\u0642\u0641\u0644 \u0648\u0627\u062A\u0641\u062A\u062D \u0648\u0647\u0648 \u0623\u0648\u0641\u0644\u0627\u064A\u0646\u060C \u0627\u0644\u0639\u062F\u0651\u0627\u062F \u0628\u064A\u0631\u062C\u0639 \u0644\u0644\u0642\u064A\u0645\u0629 \u0627\u0644\u0627\u0641\u062A\u0631\u0627\u0636\u064A\u0629 (${DEFAULT_INVOICE_NUMBER_SETTINGS.nextNumber}) \u0648\u0645\u0645\u0643\u0646 \u064A\u062A\u0643\u0631\u0631 \u0631\u0642\u0645 \u0645\u0648\u062C\u0648\u062F \u0641\u0639\u0644\u064B\u0627 (\u0645\u0639\u0631\u0648\u0641).`);
+    }
+  },
+  {
+    id: "P4-11",
+    title: "\u062A\u062C\u0645\u064A\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 (\u0627\u0644\u0645\u0628\u064A\u0639\u0627\u062A \u0627\u0644\u0634\u0647\u0631\u064A\u0629) \u0623\u0648\u0641\u0644\u0627\u064A\u0646: \u0628\u064A\u062A\u062D\u0637 \u0641\u064A \u0637\u0627\u0628\u0648\u0631 \u062A\u0627\u0646\u064A \u0648\u064A\u062A\u0637\u0628\u0651\u0642 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 (F5)",
+    run: async (c) => {
+      const monthId = businessDayOf(Date.now()).slice(0, 7);
+      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_q`;
+      const inv = `${SYSTEM_TEST_PREFIX}${c.runId}_aq`;
+      const inv2 = `${SYSTEM_TEST_PREFIX}${c.runId}_aq2`;
+      const aggLeft = (id) => getAggQueue().filter((x) => x.invoiceId === id).length;
+      const f1 = sysInstallFault(inv, () => sysFakeResponse(503));
+      try {
+        await recordInvoiceAggregate(day, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", inv, 7);
+      } finally {
+        f1.restore();
+      }
+      const queued = aggLeft(inv);
+      const spy = sysInstallFault(inv, () => void 0);
+      try {
+        const t0 = Date.now();
+        while (syncingAggQueue && Date.now() - t0 < 8e3) await sysSleep(50);
+        await syncAggregateQueue();
+      } finally {
+        spy.restore();
+      }
+      const afterSync = aggLeft(inv);
+      const again = await attemptInvoiceAggregateWrite(day, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", inv, 7);
+      const f2 = sysInstallFault(inv2, () => sysFakeResponse(403));
+      try {
+        await recordInvoiceAggregate(day, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", inv2, 7);
+      } finally {
+        f2.restore();
+      }
+      setAggQueueRaw(getAggQueue().filter((x) => x.invoiceId !== inv && x.invoiceId !== inv2));
+      c.leftover(`invoice_aggregate_writes_col/${inv}`, "\u0639\u0644\u0627\u0645\u0629 \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
+      c.check("P4-11", "\u0627\u0644\u0637\u0627\u0628\u0648\u0631\u060C \u0627\u0644\u0625\u0631\u0633\u0627\u0644\u060C \u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629\u060C \u0648\u0627\u0644\u0631\u0641\u0636 \u0627\u0644\u0646\u0647\u0627\u0626\u064A", { queued: 1, afterSync: 0, commits: 1, replay: "drop", permanentQueued: 0 }, { queued, afterSync, commits: spy.log.filter((x) => x.method === "POST").length, replay: again, permanentQueued: aggLeft(inv2) });
+      await sysCleanupAggDay(c, monthId, day);
+    }
+  },
+  {
+    id: "P4-12",
+    title: "\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u0645\u0645\u062A\u0644\u064A\u0629 + \u0645\u0641\u064A\u0634 \u0646\u062A: \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0628\u064A\u0639\u0631\u0641 \u0625\u0646 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0641\u064A \u0645\u0643\u0627\u0646\u061F \u0644\u0623\u060C \u0641\u0645\u0627\u064A\u0642\u0648\u0644\u0634 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB (F8/B14/I6)",
+    run: async (c) => {
+      const doc = c.sale("full1");
+      c.leftover(`sales_col/${doc.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const before = getOfflineQueue().length;
+      let attempt;
+      let queued;
+      const fault = sysInstallFault(doc.id, () => Promise.reject(new TypeError("Failed to fetch")));
+      const full = sysFillQueueStorage();
+      try {
+        attempt = await salesStore._attempt("upsert", doc);
+        queued = queueOfflineOp("sales_col", "upsert", doc);
+      } finally {
+        full.restore();
+        fault.restore();
+      }
+      const g = await c.getDoc("sales_col", doc.id);
+      c.check("P4-12", "[\u0646\u062A\u064A\u062C\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644\u060C \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0642\u0628\u0644 \u0628\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629\u061F\u060C \u0639\u062F\u062F \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0628\u0639\u062F\u060C \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631]", ["retry", false, before, false], [attempt, queued, getOfflineQueue().length, !!g.data]);
+      const ok = queueOfflineOp("sales_col", "upsert", doc);
+      const stored = sysQueuedCount(c, doc.id);
+      sysDropQueued(c);
+      c.check("P4-12b", "\u0628\u0639\u062F \u0645\u0627 \u0627\u0644\u0645\u0633\u0627\u062D\u0629 \u0631\u062C\u0639\u062A: \u0646\u0641\u0633 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0628\u062A\u062A\u062E\u0632\u0646 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0639\u0627\u062F\u064A", [true, 1], [ok, stored]);
+    }
+  },
+  {
+    id: "P4-M1",
+    title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646",
+    run: async (c) => {
+      c.skip("P4-M1a", "\u0636\u063A\u0637\u062A\u064A\u0646 \u0633\u0631\u064A\u0639\u062A\u064A\u0646 \u0639\u0644\u0649 \xAB\u0625\u062A\u0645\u0627\u0645\xBB (E5)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0636\u063A\u0637 \xAB\u0625\u062A\u0645\u0627\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0631\u062A\u064A\u0646 \u0628\u0633\u0631\u0639\u0629\u060C \u0644\u0627\u0632\u0645 \u0641\u0627\u062A\u0648\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 \u062A\u062A\u0639\u0645\u0644");
+      c.skip("P4-M1b", "\u0642\u0641\u0644 \u0646\u0627\u0641\u0630\u0629 \u0627\u0644\u062F\u0641\u0639 \u0623\u062B\u0646\u0627\u0621 \u0627\u0644\u062D\u0641\u0638 (E13)", "\u270B \u064A\u062F\u0648\u064A: \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0627\u0636\u063A\u0637 \xAB\u0625\u062A\u0645\u0627\u0645\xBB \u0648\u0642\u0641\u0644 \u0627\u0644\u0646\u0627\u0641\u0630\u0629 \u0641\u0648\u0631\u064B\u0627: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0644\u0627\u0632\u0645 \u062A\u062A\u062D\u0641\u0638 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0623\u0648 \u062A\u062A\u0644\u063A\u064A\u060C \u0645\u0634 \u062A\u062A\u0639\u0644\u0642");
+      c.skip("P4-M1c", "\u0627\u0644\u062E\u0631\u0648\u062C \u0645\u0646 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0623\u062B\u0646\u0627\u0621 \u0627\u0644\u062D\u0641\u0638 (E13)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0636\u063A\u0637 \xAB\u0625\u062A\u0645\u0627\u0645\xBB \u0648\u0627\u0631\u062C\u0639 \u0644\u0644\u0642\u0627\u064A\u0645\u0629 \u0628\u0633\u0631\u0639\u0629: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0644\u0627\u0632\u0645 \u062A\u062A\u062D\u0641\u0638");
+      c.skip("P4-M1d", "\u0628\u064A\u0639 \u062C\u062F\u064A\u062F \u0642\u0628\u0644 \u0642\u0641\u0644 \u0646\u0627\u0641\u0630\u0629 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB (E14)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0628\u062F\u0623 \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629 \u0648\u0627\u0646\u062A \u0644\u0633\u0647 \u0645\u0627 \u0642\u0641\u0644\u062A\u0634 \u0645\u0639\u0627\u064A\u0646\u0629 \u0627\u0644\u0644\u064A \u0641\u0627\u062A\u062A");
+      c.skip("P4-M1e", "\u0628\u0627\u0646\u0631 \u{1F4F4} \u0648\u0627\u0644\u0639\u062F\u0651\u0627\u062F (F1)", "\u270B \u064A\u062F\u0648\u064A: \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u062A\u064A\u0646\u060C \u0644\u0627\u0632\u0645 \u0627\u0644\u0628\u0627\u0646\u0631 \u064A\u0638\u0647\u0631 \xAB\u0662 \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631\xBB \u0648\u0628\u0639\u062F \u0631\u062C\u0648\u0639 \u0627\u0644\u0646\u062A \u064A\u062E\u062A\u0641\u064A");
+      c.skip("P4-M1g", "\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u0627\u0644\u0623\u062D\u0645\u0631 \u0644\u0645\u0627 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634 \u0641\u064A \u0623\u064A \u0645\u0643\u0627\u0646 (F8)", "\u270B \u064A\u062F\u0648\u064A (\u0635\u0639\u0628 \u062A\u0639\u0645\u0644\u0647): \u0648\u0642\u0641 \u0627\u0644\u0646\u062A \u0648\u0627\u0645\u062A\u0644\u0651\u064A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u0644\u0622\u062E\u0631\u0647\u0627\u060C \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u0629: \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 \u062A\u062D\u0630\u064A\u0631 \u0623\u062D\u0645\u0631 \u0641\u0648\u0642 \u0634\u0627\u0634\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0641\u064A\u0647 \u0632\u0631\u0627\u0631 \xAB\u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629\xBB \u0648\u0635\u0648\u062A \u062A\u0646\u0628\u064A\u0647 \u0643\u0644 \u062B\u0648\u0627\u0646\u064A\u060C \u0648\u0627\u0644\u0633\u0644\u0629 \u062A\u0641\u0636\u0644 \u0632\u064A \u0645\u0627 \u0647\u064A\u060C \u0648\u0645\u0641\u064A\u0634 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB. \u0648\u0628\u0639\u062F \u0645\u0627 \u0627\u0644\u0646\u062A \u0623\u0648 \u0627\u0644\u0645\u0633\u0627\u062D\u0629 \u062A\u0631\u062C\u0639 \u0648\u062A\u062F\u0648\u0633 \xAB\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0628\u064A\u0639\xBB \u062A\u0627\u0646\u064A: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062A\u062D\u0641\u0638 \u0648\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u064A\u062E\u062A\u0641\u064A");
+      c.skip("P4-M1f", "\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0648\u0644 \u0645\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0625\u0646\u062A\u0631\u0646\u062A", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0645\u0633\u062D \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0648\u0642\u0639\u060C \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0627\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642: \u0647\u0644 \u0628\u064A\u0641\u062A\u062D\u061F (\u0627\u0644\u0640 CDN \u0645\u0634 \u0628\u064A\u062A\u062E\u0632\u0646 \u0641\u064A \u0627\u0644\u0640 service worker)");
+    }
+  }
+];
+const SYS_P5_PRODUCT = {
+  id: "p",
+  name: "\u0645\u0646\u062A\u062C \u0627\u062E\u062A\u0628\u0627\u0631",
+  retail: [{ label: "", price: 10 }, { label: "\u0645\u0646 10 \u0642\u0637\u0639", price: 8 }, { label: "\u0645\u0646 50 \u0642\u0637\u0639\u0629", price: 6 }],
+  semi: 8,
+  wholesale: 6
+};
+const sysLine = (extra) => Object.assign({ id: "l1", productId: "p", productName: "\u0645\u0646\u062A\u062C \u0627\u062E\u062A\u0628\u0627\u0631", qty: 5, unitPrice: 10, tierKey: "retail", priceNote: "", priceOverridden: false, lineTotal: 50 }, extra || {});
+const SYS_PART5_CHECKS = [
+  {
+    id: "P5-01",
+    title: "\u0643\u0644 \u0634\u0631\u064A\u062D\u0629 \u0628\u062A\u0627\u062E\u062F \u0633\u0639\u0631\u0647\u0627 \u0627\u0644\u0635\u062D (\u0642\u0637\u0627\u0639\u064A / \u0646\u0635 \u062C\u0645\u0644\u0629 / \u062C\u0645\u0644\u0629) (A1)",
+    run: async (c) => {
+      const p = SYS_P5_PRODUCT;
+      const price = (tier, q) => {
+        const r = tierPriceRowForQty(p, tier, q);
+        return r ? r.price : null;
+      };
+      c.check("P5-01", "[retail \u0643\u0645\u064A\u0629 1\u060C semi\u060C wholesale]", [10, 8, 6], [price("retail", 1), price("semi", 1), price("wholesale", 1)]);
+    }
+  },
+  {
+    id: "P5-02",
+    title: "\u0633\u0639\u0631 \u0627\u0644\u0643\u0645\u064A\u0629 \u064A\u062A\u063A\u064A\u0631 \u0639\u0646\u062F \u0627\u0644\u062D\u062F\u0648\u062F \u0628\u0627\u0644\u0638\u0628\u0637: 9 / 10 / 11 \u0648 49 / 50 / 51 (A2)",
+    run: async (c) => {
+      const qs = [1, 9, 10, 11, 49, 50, 51];
+      c.check("P5-02", "\u0633\u0639\u0631 \u0627\u0644\u0642\u0637\u0639\u0629 \u0644\u0643\u0644 \u0643\u0645\u064A\u0629", [10, 10, 8, 8, 8, 6, 6], qs.map((q) => tierPriceRowForQty(SYS_P5_PRODUCT, "retail", q).price));
+    }
+  },
+  {
+    id: "P5-03",
+    title: "\u062D\u062F\u0648\u062F \u0643\u0645\u064A\u0629 \u063A\u0631\u064A\u0628\u0629: \u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629\u060C \u0635\u0641\u0648\u0641 \u0645\u0634 \u0645\u062A\u0631\u062A\u0628\u0629\u060C \u0635\u0641 \u0645\u0646 \u063A\u064A\u0631 \u0631\u0642\u0645 = \u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u0623\u0633\u0627\u0633\u064A (A15)",
+    run: async (c) => {
+      const arabic = { retail: [{ label: "", price: 10 }, { label: "\u0645\u0646 \u0661\u0662 \u0642\u0637\u0639\u0629", price: 7 }] };
+      const unsorted = { retail: [{ label: "\u0645\u0646 50", price: 6 }, { label: "", price: 10 }, { label: "\u0645\u0646 10", price: 8 }] };
+      const pr = (p, q) => tierPriceRowForQty(p, "retail", q).price;
+      c.check("P5-03", "[\u0639\u0631\u0628\u064A 11\u060C \u0639\u0631\u0628\u064A 12\u060C \u0645\u0634 \u0645\u062A\u0631\u062A\u0628 5\u060C 20\u060C 60]", [10, 7, 10, 8, 6], [pr(arabic, 11), pr(arabic, 12), pr(unsorted, 5), pr(unsorted, 20), pr(unsorted, 60)]);
+      const onlyBulk = { retail: [{ label: "\u0645\u0646 10 \u0642\u0637\u0639", price: 8 }] };
+      c.note(`\u0644\u0648 \u0627\u0644\u0634\u0631\u064A\u062D\u0629 \u0641\u064A\u0647\u0627 \u0635\u0641 \xAB\u0645\u0646 10\xBB \u0628\u0633 (\u0645\u0646 \u063A\u064A\u0631 \u0633\u0639\u0631 \u0623\u0633\u0627\u0633\u064A)\u060C \u0628\u064A\u0639 \u0642\u0637\u0639\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u064A\u062A\u0633\u0639\u0651\u0631 \u0628\u0640 ${pr(onlyBulk, 1)} (\u0633\u0639\u0631 \u0627\u0644\u062C\u0645\u0644\u0629) \u0644\u0623\u0646 \u0645\u0641\u064A\u0634 \u0635\u0641 \u0623\u0642\u0644 \u0645\u0646\u0647.`);
+    }
+  },
+  {
+    id: "P5-04",
+    title: "\u0634\u0631\u064A\u062D\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0633\u0639\u0631 \u062D\u0642\u064A\u0642\u064A: \u0645\u0627 \u062A\u062A\u0628\u0627\u0639\u0634 \u0648\u0644\u0627 \u062A\u062A\u0633\u0639\u0651\u0631 \u0628\u0635\u0641\u0631 (A3)",
+    run: async (c) => {
+      const mk = (v) => ({ retail: v });
+      const none = [mk(void 0), mk(null), mk(0), mk(-3), mk("abc"), mk(NaN), mk([]), mk([{ label: "", price: 0 }])].map((p) => tierPriceRowForQty(p, "retail", 1));
+      const mixed = mk([{ label: "", price: 5 }, { label: "\u0645\u0646 10", price: 0 }]);
+      const blocked = [tierSaleBlocked(mk(0), "retail", 1, false, false), tierSaleBlocked(mk(0), "retail", 1, true, false), tierSaleBlocked(mk(0), "retail", 1, true, true)];
+      c.check("P5-04", "\u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0628\u062A\u0631\u062C\u0651\u0639 null\u060C \u0648\u0627\u0644\u0635\u0641 \u063A\u064A\u0631 \u0627\u0644\u0645\u0633\u0639\u0651\u0631 \u0628\u064A\u062A\u0645\u0646\u0639\u060C \u0648\u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0627\u0644\u064A\u062F\u0648\u064A \u0628\u064A\u0639\u062F\u0651\u064A", { none: none.map(() => null), mixed: [5, null], blocked: [true, true, false] }, { none, mixed: [tierPriceRowForQty(mixed, "retail", 5).price, tierPriceRowForQty(mixed, "retail", 20)], blocked });
+    }
+  },
+  {
+    id: "P5-05",
+    title: "\u0625\u0636\u0627\u0641\u0629 \u0646\u0641\u0633 \u0627\u0644\u0645\u0646\u062A\u062C \u0628\u0646\u0641\u0633 \u0627\u0644\u0633\u0639\u0631: \u0627\u0644\u0643\u0645\u064A\u0627\u062A \u062A\u062A\u062C\u0645\u0651\u0639 \u0648\u0627\u0644\u0633\u0639\u0631 \u064A\u062A\u062D\u062F\u062F \u0645\u0646 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u062C\u062F\u064A\u062F (A4)",
+    run: async (c) => {
+      const p = SYS_P5_PRODUCT;
+      const merged = mergeCartLine(sysLine(), sysLine({ id: "l2" }), p);
+      const manual = mergeCartLine(sysLine({ unitPrice: 9, priceOverridden: true, lineTotal: 45 }), sysLine({ id: "l2", unitPrice: 9, priceOverridden: true, lineTotal: 45 }), p);
+      c.check("P5-05", "[\u0643\u0645\u064A\u0629\u060C \u0633\u0639\u0631\u060C \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0633\u0637\u0631] \u0644\u0644\u0633\u0639\u0631 \u0627\u0644\u0623\u0648\u062A\u0648\u0645\u0627\u062A\u064A\u0643 \u0648\u0627\u0644\u064A\u062F\u0648\u064A", { auto: [10, 8, 80, false], manual: [10, 9, 90, true] }, { auto: [merged.qty, merged.unitPrice, merged.lineTotal, merged.priceOverridden], manual: [manual.qty, manual.unitPrice, manual.lineTotal, manual.priceOverridden] });
+    }
+  },
+  {
+    id: "P5-06",
+    title: "\u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u064A\u062F\u0648\u064A \u0645\u0627 \u064A\u062A\u063A\u064A\u0631\u0634 \u0644\u0645\u0627 \u0627\u0644\u0643\u0645\u064A\u0629 \u062A\u062A\u063A\u064A\u0631\u060C \u0648\u0641\u062A\u062D \u0627\u0644\u0633\u0637\u0631 \u062A\u0627\u0646\u064A \u064A\u0628\u062F\u0623 \u0628\u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u064A\u062F\u0648\u064A (A6)",
+    run: async (c) => {
+      const p = SYS_P5_PRODUCT;
+      const manual = repriceLineForQty(sysLine({ unitPrice: 9, priceOverridden: true }), p, 60);
+      const auto = repriceLineForQty(sysLine(), p, 60);
+      const noTier = repriceLineForQty(sysLine({ tierKey: "ghost", unitPrice: 4 }), p, 60);
+      const st = [initialPickerPriceState(null), initialPickerPriceState(sysLine({ unitPrice: 7.5, priceOverridden: true })), initialPickerPriceState(sysLine())];
+      c.check("P5-06", "[\u064A\u062F\u0648\u064A\u060C \u0623\u0648\u062A\u0648\u0645\u0627\u062A\u064A\u0643\u060C \u0634\u0631\u064A\u062D\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0633\u0639\u0631\u060C \u062D\u0627\u0644\u0629 \u0641\u062A\u062D \u0627\u0644\u0633\u0637\u0631]", { manual: 9, auto: 6, noTier: 4, states: [{ priceOverridden: false, manualPrice: "" }, { priceOverridden: true, manualPrice: "7.5" }, { priceOverridden: false, manualPrice: "10" }] }, { manual: manual.unitPrice, auto: auto.unitPrice, noTier: noTier.unitPrice, states: st });
+    }
+  },
+  {
+    id: "P5-07",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0627\u0644\u0645\u0643\u062A\u0648\u0628\u0629 (\u0663\u066B\u0665 \u0628\u0641\u0627\u0635\u0644\u0629 \u0639\u0631\u0628\u064A\u0629\u060C 12abc\u060C 1e3) \u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u0645\u0627 \u062A\u062A\u062D\u0648\u0651\u0644\u0634 \u0644\u0623\u0631\u0642\u0627\u0645 \u063A\u0644\u0637 \u0628\u0635\u0645\u062A (A8)",
+    run: async (c) => {
+      const pairs = [["12", 12], ["12.5", 12.5], ["12,5", 12.5], ["\u0661\u0662\u0663", 123], ["\u06F1\u06F2\u06F3", 123], [" 7 ", 7], ["", null], ["abc", null], ["0", 0], ["\u0663\u066B\u0665", 3.5], ["12abc", null], ["1e3", null]];
+      const actual = pairs.map(([s]) => parseNum(s));
+      const bad = pairs.filter(([s, want], i) => actual[i] !== want).map(([s], i) => `\xAB${s}\xBB \u2190 ${actual[pairs.findIndex((x) => x[0] === s)]}`);
+      c.check("P5-07", "\u0627\u0644\u0646\u0627\u062A\u062C \u0644\u0643\u0644 \u0645\u062F\u062E\u0644", pairs.map(([, w]) => w), actual, bad.length ? `\u0627\u062A\u062D\u0648\u0651\u0644\u0648\u0627 \u063A\u0644\u0637: ${bad.join("\u060C ")}. \u064A\u0639\u0646\u064A \u0633\u0639\u0631 \u0623\u0648 \u0643\u0645\u064A\u0629 \u0627\u062A\u0643\u062A\u0628\u062A \xAB\u0663\u066B\u0665\xBB \u0628\u062A\u062A\u0633\u062C\u0651\u0644 \u0663 \u0645\u0646 \u063A\u064A\u0631 \u0623\u064A \u062A\u0646\u0628\u064A\u0647.` : "");
+      c.note(`\xAB1,000\xBB \u0628\u062A\u062A\u0642\u0631\u0627 ${parseNum("1,000")} \u0644\u0623\u0646 \u0627\u0644\u0641\u0627\u0635\u0644\u0629 \u0628\u062A\u062A\u0639\u0627\u0645\u0644 \u0643\u0639\u0644\u0627\u0645\u0629 \u0639\u0634\u0631\u064A\u0629. \u0644\u0648 \u062D\u062F \u0643\u062A\u0628 \u0623\u0644\u0641 \u0628\u0627\u0644\u0641\u0627\u0635\u0644\u0629 \u0647\u064A\u062A\u0633\u062C\u0651\u0644 \u0648\u0627\u062D\u062F.`);
+    }
+  },
+  {
+    id: "P5-08",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0633\u0637\u0631 \u0645\u0627 \u064A\u0637\u0644\u0639\u0634 \u0628\u0643\u0633\u0648\u0631 \u0632\u064A\u0627\u062F\u0629 (\u0642\u0631\u0648\u0634 \u0628\u0627\u0644\u0623\u0644\u0641) (A9)",
+    run: async (c) => {
+      const cases = [[1.1, 3], [4.35, 100], [0.1, 3], [19.99, 3], [12.5, 3]];
+      const lines = cases.map(([price, q]) => {
+        const p = { retail: price };
+        return mergeCartLine(sysLine({ qty: 1, unitPrice: price, lineTotal: price }), sysLine({ id: "l2", qty: q - 1, unitPrice: price, lineTotal: price * (q - 1) }), p).lineTotal;
+      });
+      const clean = lines.map((v) => Number(v.toFixed(2)) === v);
+      c.check("P5-08", "\u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0633\u0637\u0631 \u0628\u0642\u0631\u0634\u064A\u0646 \u0628\u0627\u0644\u0638\u0628\u0637\u061F (1.1\xD73\u060C 4.35\xD7100\u060C 0.1\xD73\u060C 19.99\xD73\u060C 12.5\xD73)", [true, true, true, true, true], clean, `\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0627\u0644\u0641\u0639\u0644\u064A\u0629: ${lines.join(" \u060C ")}`);
+    }
+  },
+  {
+    id: "P5-09",
+    title: "\u0623\u0631\u062E\u0635 \u0633\u0639\u0631 \u0644\u0644\u0643\u0645\u064A\u0629 (\u0628\u064A\u062A\u0642\u0627\u0631\u0646 \u0628\u064A\u0647 \u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u0627\u0644\u0623\u062D\u0645\u0631): \u0627\u0644\u0634\u0631\u0627\u064A\u062D \u063A\u064A\u0631 \u0627\u0644\u0645\u0633\u0639\u0651\u0631\u0629 \u0628\u062A\u062A\u062A\u062C\u0627\u0647\u0644 (A7)",
+    run: async (c) => {
+      const p = { retail: [{ label: "", price: 10 }, { label: "\u0645\u0646 10", price: 8 }], semi: 7, wholesale: 0 };
+      const ids = ["retail", "semi", "wholesale"];
+      c.check("P5-09", "[\u0643\u0645\u064A\u0629 1\u060C \u0643\u0645\u064A\u0629 10\u060C \u0645\u0646\u062A\u062C \u0645\u0646 \u063A\u064A\u0631 \u0623\u0633\u0639\u0627\u0631]", [7, 7, null], [cheapestTierPriceForQty(p, ids, 1), cheapestTierPriceForQty(p, ids, 10), cheapestTierPriceForQty({}, ids, 1)]);
+    }
+  },
+  {
+    id: "P5-M1",
+    title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0645\u0646\u0637\u0642 \u0627\u0644\u0623\u0633\u0639\u0627\u0631",
+    run: async (c) => {
+      c.skip("P5-M1a", "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629 A14: \u062A\u0639\u062F\u064A\u0644 \u0633\u0639\u0631 \u0627\u0644\u0633\u0637\u0631 \u0645\u0646 \u0627\u0644\u0633\u0644\u0629", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0636\u063A\u0637 \u0645\u0637\u0648\u0651\u0644\u064B\u0627 \u062B\u0627\u0646\u064A\u062A\u064A\u0646 \u0639\u0644\u0649 \u0633\u0639\u0631 \u0627\u0644\u0633\u0637\u0631 \u0648\u0627\u0643\u062A\u0628 \u0665\u060C \u0628\u0639\u062F\u0647\u0627 \u063A\u064A\u0651\u0631 \u0627\u0644\u0643\u0645\u064A\u0629: \u0644\u0648 \u0627\u0644\u0633\u0639\u0631 \u0631\u062C\u0639 \u0644\u0633\u0639\u0631 \u0627\u0644\u0634\u0631\u064A\u062D\u0629 \u064A\u0628\u0642\u0649 \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0636\u0627\u0639 (\u0627\u0644\u0643\u0648\u062F \u0645\u0634 \u0628\u064A\u0639\u0644\u0651\u0645 \u0627\u0644\u0633\u0637\u0631 \xAB\u0633\u0639\u0631 \u064A\u062F\u0648\u064A\xBB). \u062C\u0631\u0651\u0628 \u0643\u0645\u0627\u0646 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0645\u0646 \u063A\u064A\u0631 \u0635\u0644\u0627\u062D\u064A\u0629 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0633\u0639\u0631");
+      c.skip("P5-M1b", "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629 E11: \u0633\u0637\u0631 \u0628\u0633\u0639\u0631 \u0635\u0641\u0631", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0643\u062A\u0628 \u0633\u0639\u0631 \u0660 \u0644\u0644\u0633\u0637\u0631 \u0648\u0628\u064A\u0639: \u0645\u0641\u0631\u0648\u0636 \u064A\u062A\u0631\u0641\u0636 \u0623\u0648 \u064A\u0637\u0644\u0639 \u062A\u062D\u0630\u064A\u0631\u060C \u062D\u0627\u0644\u064A\u064B\u0627 \u0627\u0644\u0643\u0648\u062F \u0628\u064A\u0642\u0628\u0644 \u0627\u0644\u0635\u0641\u0631");
+      c.skip("P5-M1c", "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629 C7: \u062A\u063A\u064A\u064A\u0631 \u0627\u0633\u0645 \u0627\u0644\u0632\u0628\u0648\u0646", "\u270B \u064A\u062F\u0648\u064A: \u0636\u064A\u0641 \u0645\u0646\u062A\u062C\u0627\u062A \u0628\u0634\u0631\u064A\u062D\u0629 \u0642\u0637\u0627\u0639\u064A\u060C \u063A\u064A\u0651\u0631 \u0627\u0633\u0645 \u0627\u0644\u0632\u0628\u0648\u0646 \u0644\u0632\u0628\u0648\u0646 \u0645\u0639\u0631\u0648\u0641 \u0628\u0634\u0631\u064A\u062D\u0629 \u062C\u0645\u0644\u0629: \u0647\u0644 \u0627\u0644\u0633\u0644\u0629 \u0628\u062A\u062A\u0633\u0639\u0651\u0631 \u062A\u0627\u0646\u064A\u061F");
+      c.skip("P5-M1d", "\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0627\u0644\u0623\u0635\u0641\u0631 (A7)", "\u270B \u064A\u062F\u0648\u064A: \u0628\u064A\u0639 \u0628\u0633\u0639\u0631 \u0623\u0642\u0644 \u0645\u0646 \u0623\u0631\u062E\u0635 \u0634\u0631\u064A\u062D\u0629 (\u0623\u062D\u0645\u0631) \u0648\u0623\u0642\u0644 \u0645\u0646 \u0633\u0639\u0631 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 (\u0623\u0635\u0641\u0631) \u0648\xAB\u0639\u062F\u0645 \u0627\u0644\u062A\u062D\u0630\u064A\u0631\xBB \u0628\u064A\u0633\u0643\u062A\u0647\u0645 \u0641\u064A \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062F\u064A \u0628\u0633");
+      c.skip("P5-M1e", "\u062A\u0631\u0627\u062C\u0639 \u0627\u0644\u062D\u0630\u0641 (A12)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0645\u0633\u062D \u0633\u0637\u0631 \u0648\u062F\u0648\u0633 \xAB\u062A\u0631\u0627\u062C\u0639\xBB \u062E\u0644\u0627\u0644 \u0664 \u062B\u0648\u0627\u0646\u064A\u060C \u0648\u0628\u0639\u062F \u0627\u0644\u062A\u0628\u062F\u064A\u0644 \u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u0627\u0646\u064A\u0629");
+      c.skip("P5-M1f", "\u0643\u0645\u064A\u0629 \u0628\u0643\u0633\u0648\u0631 (A8)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0643\u062A\u0628 \u0643\u0645\u064A\u0629 \u0661\u066B\u0665: \u0627\u0644\u0631\u0633\u0627\u0644\u0629 \u0628\u062A\u0642\u0648\u0644 \xAB\u0639\u062F\u062F \u0635\u062D\u064A\u062D\xBB \u0644\u0643\u0646 \u0627\u0644\u0643\u0648\u062F \u0628\u064A\u0642\u0628\u0644 \u0627\u0644\u0643\u0633\u0648\u0631");
+    }
+  }
+];
+const SYS_PART6_CHECKS = [
+  {
+    id: "P6-01",
+    title: "\u0627\u0644\u0628\u062D\u062B \u0627\u0644\u0639\u0631\u0628\u064A: \u0623/\u0625/\u0627\u060C \u0629/\u0647\u060C \u0649/\u064A\u060C \u0624\u060C \u0627\u0644\u062A\u0634\u0643\u064A\u0644\u060C \u0627\u0644\u062D\u0631\u0648\u0641 \u0627\u0644\u0643\u0628\u064A\u0631\u0629\u060C \u0627\u0644\u0645\u0633\u0627\u0641\u0627\u062A \u0627\u0644\u0632\u0627\u064A\u062F\u0629 (B1)",
+    run: async (c) => {
+      const pairs = [["\u0623\u062D\u0645\u062F", "\u0627\u062D\u0645\u062F", true], ["\u0625\u0633\u0644\u0627\u0645", "\u0627\u0633\u0644\u0627\u0645", true], ["\u0645\u062F\u0631\u0633\u0629", "\u0645\u062F\u0631\u0633\u0647", true], ["\u0639\u0644\u0649", "\u0639\u0644\u064A", true], ["\u0645\u0624\u0645\u0646", "\u0645\u0648\u0645\u0646", true], ["\u0645\u064F\u062D\u064E\u0645\u064E\u0651\u062F", "\u0645\u062D\u0645\u062F", true], ["ABC", "abc", true], ["\u0639\u0644\u064A   \u0645\u062D\u0645\u062F", "\u0639\u0644\u064A \u0645\u062D\u0645\u062F", true], ["  \u0639\u0644\u064A ", "\u0639\u0644\u064A", true], ["\u0622\u064A\u0629", "\u0627\u064A\u0647", true], ["\u0639\u0644\u064A", "\u0639\u0644\u064A \u0645\u062D\u0645\u062F", false]];
+      const actual = pairs.map(([a, b]) => normalizeArabic(a) === normalizeArabic(b));
+      c.check("P6-01", "\u0643\u0644 \u0632\u0648\u062C \u0628\u064A\u062A\u0637\u0627\u0628\u0642 (\u0623\u0648 \u0644\u0623) \u0632\u064A \u0627\u0644\u0645\u062A\u0648\u0642\u0639", pairs.map((x) => x[2]), actual);
+      const tatweel = normalizeArabic("\u0645\u0640\u062D\u0640\u0645\u062F") === normalizeArabic("\u0645\u062D\u0645\u062F");
+      c.check("P6-01b", "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0627\u0644\u062A\u0637\u0648\u064A\u0644 (\u0645\u0640\u062D\u0640\u0645\u062F) \u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u064A\u062A\u0637\u0627\u0628\u0642 \u0645\u0639 (\u0645\u062D\u0645\u062F)", true, tatweel);
+    }
+  },
+  {
+    id: "P6-02",
+    title: "\u0627\u0644\u0645\u0633\u0648\u062F\u0627\u062A: \u0628\u062A\u062A\u062D\u0641\u0638 \u0648\u062A\u062A\u0642\u0631\u0627 \u0632\u064A \u0645\u0627 \u0647\u064A (\u0633\u0644\u0629 \u0663\u0660\u0660 \u0633\u0637\u0631 \u0648\u0639\u0631\u0628\u064A)\u060C \u0648\u0627\u0644\u0645\u0644\u0641 \u0627\u0644\u062A\u0627\u0644\u0641 \u0628\u064A\u0631\u062C\u0651\u0639 \u0641\u0627\u0636\u064A \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u064A\u0643\u0633\u0631 (C3/C8)",
+    run: async (c) => {
+      const backup = (() => {
+        try {
+          return localStorage.getItem(CASHIER_INVOICES_KEY);
+        } catch {
+          return null;
+        }
+      })();
+      try {
+        const inv = makeEmptyInvoice("retail", "\u0641\u0627\u062A\u0648\u0631\u0629 \u0661", "\u0632\u0628\u0648\u0646 \u0639\u0631\u0628\u064A \u2713", 5);
+        for (let i = 0; i < 300; i++) inv.items.push({ id: `i${i}`, productId: `p${i}`, productName: `\u0645\u0646\u062A\u062C \u0631\u0642\u0645 ${i} \u0627\u0633\u0645 \u0637\u0648\u064A\u0644 \u062C\u062F\u064B\u0627 \u0644\u0627\u062E\u062A\u0628\u0627\u0631 \u0627\u0644\u062D\u062C\u0645`, qty: i + 1, unitPrice: 10.5, tierKey: "retail", priceNote: "", priceOverridden: false, lineTotal: (i + 1) * 10.5 });
+        saveCashierInvoices([inv]);
+        const back = loadCashierInvoices();
+        const bytes = JSON.stringify({ invoices: [inv] }).length;
+        localStorage.setItem(CASHIER_INVOICES_KEY, "{not json");
+        const corrupt = loadCashierInvoices();
+        localStorage.removeItem(CASHIER_INVOICES_KEY);
+        const empty = loadCashierInvoices();
+        c.check("P6-02", "\u0627\u0644\u062D\u0641\u0638 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629", { roundTrip: true, under1MB: true, corrupt: null, empty: null }, { roundTrip: JSON.stringify(back) === JSON.stringify({ invoices: [inv] }), under1MB: bytes < 1e6, corrupt, empty }, `\u062D\u062C\u0645 \u0627\u0644\u0633\u0644\u0629: ${bytes} \u062D\u0631\u0641`);
+      } finally {
+        try {
+          if (backup === null) localStorage.removeItem(CASHIER_INVOICES_KEY);
+          else localStorage.setItem(CASHIER_INVOICES_KEY, backup);
+        } catch {
+        }
+      }
+    }
+  },
+  {
+    id: "P6-03",
+    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0644\u0645\u0627 \u0645\u0648\u0638\u0641 \u064A\u0637\u0644\u0639 \u0648\u064A\u062F\u062E\u0644 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0639\u0644\u0649 \u0646\u0641\u0633 \u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644\u060C \u0645\u0633\u0648\u062F\u0627\u062A \u0627\u0644\u0623\u0648\u0644 \u0628\u062A\u0641\u0636\u0644 (C4)",
+    run: async (c) => {
+      const clearsDrafts = String(clearSession).includes("CASHIER_INVOICES_KEY");
+      c.check("P6-03", "\u0627\u0644\u062E\u0631\u0648\u062C \u0628\u064A\u0645\u0633\u062D \u0627\u0644\u0645\u0633\u0648\u062F\u0627\u062A\u061F", { clearsDrafts: true }, { clearsDrafts }, clearsDrafts ? "" : "\u0627\u0644\u062E\u0631\u0648\u062C \u0628\u064A\u0645\u0633\u062D \u0627\u0644\u062A\u0648\u0643\u0646 \u0628\u0633\u060C \u0641\u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629 \u0644\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0623\u0648\u0644 \u0628\u062A\u0638\u0647\u0631 \u0644\u0644\u062A\u0627\u0646\u064A (\u0648\u0627\u0644\u0645\u0633\u0648\u062F\u0627\u062A \u0645\u0634 \u0645\u0631\u0628\u0648\u0637\u0629 \u0628\u062D\u0633\u0627\u0628).");
+    }
+  },
+  {
+    id: "P6-04",
+    title: "\u0645\u0646\u062A\u062C \u0627\u062A\u0645\u0633\u062D \u0623\u0648 \u0627\u062A\u063A\u064A\u0651\u0631 \u0648\u0647\u0648 \u0641\u064A \u0627\u0644\u0633\u0644\u0629: \u0645\u0641\u064A\u0634 \u0643\u0631\u0627\u0634 \u0648\u0627\u0644\u0633\u0637\u0631 \u0645\u0627 \u064A\u062A\u063A\u064A\u0631\u0634 \u0633\u0639\u0631\u0647 \u0628\u0627\u0644\u063A\u0644\u0637 (A10/A11)",
+    run: async (c) => {
+      let threw = false;
+      let out = {};
+      try {
+        const line = sysLine({ qty: 2, unitPrice: 10, lineTotal: 20 });
+        out = {
+          deletedKeepsPrice: repriceLineForQty(line, void 0, 5).unitPrice === 10,
+          editBlocked: tierSaleBlocked(void 0, "retail", 5, true, false) === true,
+          mergeKeepsPrice: mergeCartLine(line, line, void 0).unitPrice === 10 && mergeCartLine(line, line, void 0).qty === 4,
+          changedPriceUsedOnEdit: repriceLineForQty(line, { retail: 12 }, 3).unitPrice === 12
+        };
+      } catch {
+        threw = true;
+      }
+      c.check("P6-04", "[\u0627\u0644\u0633\u0644\u0629]", { threw: false, deletedKeepsPrice: true, editBlocked: true, mergeKeepsPrice: true, changedPriceUsedOnEdit: true }, Object.assign({ threw }, out));
+      c.note("\u0644\u0648 \u0633\u0639\u0631 \u0627\u0644\u0645\u0646\u062A\u062C \u0627\u062A\u063A\u064A\u0651\u0631 \u0648\u0647\u0648 \u0641\u064A \u0627\u0644\u0633\u0644\u0629\u060C \u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0644\u064A \u0645\u0627 \u0627\u062A\u0644\u0645\u0633\u0634 \u0628\u064A\u0641\u0636\u0644 \u0628\u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u0642\u062F\u064A\u0645\u060C \u0648\u0627\u0644\u0633\u0637\u0631 \u0627\u0644\u0644\u064A \u0643\u0645\u064A\u062A\u0647 \u0627\u062A\u0639\u062F\u0651\u0644\u062A \u0628\u064A\u0627\u062E\u062F \u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u062C\u062F\u064A\u062F.");
+    }
+  },
+  {
+    id: "P6-M1",
+    title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u0628\u062D\u062B \u0648\u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u0645\u062A\u0639\u062F\u062F\u0629",
+    run: async (c) => {
+      c.skip("P6-M1a", "\u0627\u0644\u0628\u0627\u0631\u0643\u0648\u062F (B3)", "\u270B \u064A\u062F\u0648\u064A: \u0645\u0633\u062D \u0628\u0627\u0631\u0643\u0648\u062F \u0645\u0648\u062C\u0648\u062F\u060C \u063A\u064A\u0631 \u0645\u0648\u062C\u0648\u062F (\u0635\u0648\u062A + \u0631\u0633\u0627\u0644\u0629)\u060C \u0645\u0646\u062A\u062C \u0644\u064A\u0647 \u0623\u0643\u062A\u0631 \u0645\u0646 \u0628\u0627\u0631\u0643\u0648\u062F\u060C \u0648\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u0645\u0633\u062D \u0628\u0639\u062F \u0627\u0644\u0625\u0636\u0627\u0641\u0629");
+      c.skip("P6-M1b", "\u0627\u0644\u0628\u062D\u062B \u0648\u0627\u0644\u062A\u0635\u0646\u064A\u0641\u0627\u062A (B1/B2/B6/B7)", "\u270B \u064A\u062F\u0648\u064A: \u0628\u062D\u062B \u0641\u0627\u0636\u064A\u060C \u062D\u062F \u0661\u0662 \u0646\u062A\u064A\u062C\u0629\u060C \xAB\u0627\u0644\u0623\u0643\u062B\u0631 \u0645\u0628\u064A\u0639\u064B\u0627\xBB\u060C \u062A\u0635\u0646\u064A\u0641 \u0641\u0627\u0636\u064A\u060C \u0645\u0646\u062A\u062C \u0645\u0646 \u063A\u064A\u0631 \u062A\u0635\u0646\u064A\u0641\u060C \u0628\u0627\u0631\u0643\u0648\u062F \u0645\u062A\u0643\u0631\u0631 \u0639\u0644\u0649 \u0645\u0646\u062A\u062C\u064A\u0646");
+      c.skip("P6-M1c", "\u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u0645\u062A\u0639\u062F\u062F\u0629 (C1/C2/C8)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0641\u062A\u062D \u0665 \u0641\u0648\u0627\u062A\u064A\u0631 \u0648\u0628\u062F\u0651\u0644 \u0628\u064A\u0646\u0647\u0645\u060C \u0627\u0642\u0641\u0644 \u0627\u0644\u0646\u0634\u0637\u0629 \u0628\u062A\u0623\u0643\u064A\u062F\u060C \u0633\u0644\u0629 \u0661\u0660\u0660 \u0633\u0637\u0631\u060C \u0627\u0633\u0645 \u0645\u0646\u062A\u062C \u0637\u0648\u064A\u0644 \u062C\u062F\u064B\u0627");
+      c.skip("P6-M1d", "\u0627\u0633\u0645 \u0627\u0644\u0632\u0628\u0648\u0646 (C5/C6)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0642\u062A\u0631\u0627\u062D\u0627\u062A \u0622\u062E\u0631 \u0669\u0660 \u064A\u0648\u0645\u060C \u0627\u0644\u0634\u0631\u064A\u062D\u0629 \u0627\u0644\u0645\u062A\u0630\u0643\u0631\u0629\u060C \u0627\u0644\u062A\u0639\u062F\u064A\u0644 \u0628\u0627\u0644\u0636\u063A\u0637 \u0627\u0644\u0645\u0637\u0648\u0651\u0644\u060C \u0627\u0633\u0645 \u0641\u064A\u0647 \u0631\u0645\u0648\u0632 \u0623\u0648 HTML");
+      c.skip("P6-M1e", "\u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 (B5/C9)", "\u270B \u064A\u062F\u0648\u064A: \u0648\u0642\u0641 \u0627\u0644\u0646\u062A \u0648\u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631: \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A \u0645\u0646 \u0627\u0644\u0643\u0627\u0634 \u0648\u0627\u0644\u0628\u0627\u0646\u0631 \u0638\u0627\u0647\u0631 \u0648\u0627\u0642\u062A\u0631\u0627\u062D\u0627\u062A \u0627\u0644\u0623\u0633\u0645\u0627\u0621 \u0634\u063A\u0627\u0644\u0629");
+      c.skip("P6-M1f", "\u0627\u0644\u0645\u0633\u0648\u062F\u0627\u062A \u0628\u0639\u062F \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u062A\u062D\u0645\u064A\u0644 (C3)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0641\u062A\u062D \u0641\u0627\u062A\u0648\u0631\u0629 \u0628\u0645\u0646\u062A\u062C\u0627\u062A\u060C \u0627\u0639\u0645\u0644 Refresh: \u0644\u0627\u0632\u0645 \u062A\u0631\u062C\u0639 \u0632\u064A \u0645\u0627 \u0647\u064A\u060C \u0648\u0628\u0639\u062F \u0627\u0644\u0628\u064A\u0639 \u062A\u062A\u0641\u0631\u063A");
+    }
+  }
+];
+const SYS_PART7_CHECKS = [
+  {
+    id: "P7-01",
+    title: "\u0643\u0644 \u0644\u062D\u0638\u0629 (\u0643\u0644 \u0646\u0635 \u0633\u0627\u0639\u0629) \u0628\u062A\u0642\u0639 \u062C\u0648\u0647 \u0645\u062F\u0649 \u064A\u0648\u0645\u0647\u0627 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u2014 \u0639\u0644\u0649 \u0633\u0627\u0639\u0629 \u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644 (M1/M2)",
+    run: async (c) => {
+      const bad = [];
+      let count = 0;
+      const now = Date.now();
+      for (let ts = now - 60 * 864e5; ts < now + 240 * 864e5; ts += 18e5) {
+        count++;
+        const r = businessDayRange(0, ts);
+        if (!(ts >= r.start && ts <= r.end) || businessDayOf(r.start) !== businessDayOf(ts) || businessDayOf(r.end) !== businessDayOf(ts)) {
+          if (bad.length < 5) bad.push(new Date(ts).toString());
+        }
+      }
+      c.check("P7-01", "\u0644\u062D\u0638\u0627\u062A \u062E\u0627\u0631\u062C \u0645\u062F\u0649 \u064A\u0648\u0645\u0647\u0627", [], bad, `\u0627\u062A\u0641\u062D\u0635 ${count} \u0644\u062D\u0638\u0629`);
+    }
+  },
+  {
+    id: "P7-02",
+    title: "\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0628\u0639\u062F\u0647 \u0628\u064A\u0628\u062F\u0623 \u0628\u0627\u0644\u0638\u0628\u0637 \u0628\u0639\u062F \u0645\u0627 \u0627\u0644\u064A\u0648\u0645 \u064A\u062E\u0644\u0635 (\u0645\u0641\u064A\u0634 \u0641\u062C\u0648\u0629 \u0648\u0644\u0627 \u062A\u062F\u0627\u062E\u0644) \u0648\u0623\u0633\u0628\u0648\u0639 \u0627\u0644\u0633\u0628\u062A\u2192\u0627\u0644\u062C\u0645\u0639\u0629 \u0645\u062A\u0635\u0644",
+    run: async (c) => {
+      const bad = [];
+      const now = Date.now();
+      for (const anchor of [now, now + 60 * 864e5, now + 150 * 864e5, now + 220 * 864e5]) {
+        for (let k = 0; k < 90; k++) {
+          const a = businessDayRange(k + 1, anchor);
+          const b = businessDayRange(k, anchor);
+          if (a.end + 1 !== b.start && bad.length < 5) bad.push(["day", k, new Date(anchor).toDateString()]);
+        }
+        const w1 = currentCalendarWeekRange(anchor);
+        const w2 = currentCalendarWeekRange(anchor + 7 * 864e5);
+        const startsOk = new Date(w1.start).getDay() === 6 && new Date(w1.start).getHours() === 3;
+        if ((w1.end + 1 !== w2.start || !startsOk) && bad.length < 5) bad.push(["week", new Date(anchor).toDateString()]);
+      }
+      c.check("P7-02", "\u0641\u062C\u0648\u0627\u062A \u0623\u0648 \u062A\u062F\u0627\u062E\u0644\u0627\u062A", [], bad);
+    }
+  },
+  {
+    id: "P7-03",
+    title: "\u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u064A\u0627\u0645 \u0644\u0644\u0645\u062F\u0649 \u0628\u062A\u062C\u064A\u0628 \u0643\u0644 \u0627\u0644\u0623\u064A\u0627\u0645 \u0648\u0645\u0641\u064A\u0634 \u064A\u0648\u0645 \u0628\u064A\u062A\u0641\u0648\u0651\u062A (\u0645\u062F\u0649 \u0628\u064A\u0639\u062F\u0651\u064A \u064A\u0648\u0645 \u062A\u063A\u064A\u064A\u0631 \u0633\u0627\u0639\u0629)",
+    run: async (c) => {
+      const bad = [];
+      const now = Date.now();
+      const key = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      for (let off = -60; off < 240; off++) {
+        const startTs = now + off * 864e5;
+        const endTs = startTs + 2 * 864e5 + 18e5;
+        const days = businessDaysInRange(startTs, endTs);
+        const ok = days.length >= 3 && days[0] === businessDayOf(startTs) && days[days.length - 1] === businessDayOf(endTs) && days.every((d, i) => i === 0 || d > days[i - 1]);
+        const consecutive = days.every((d, i) => {
+          if (i === 0) return true;
+          const p = days[i - 1].split("-").map(Number);
+          const n = new Date(p[0], p[1] - 1, p[2] + 1, 12, 0);
+          return key(n) === d;
+        });
+        if ((!ok || !consecutive) && bad.length < 5) bad.push([new Date(startTs).toDateString(), days]);
+      }
+      c.check("P7-03", "\u0645\u062F\u0649 \u0641\u064A\u0647 \u0623\u064A\u0627\u0645 \u0646\u0627\u0642\u0635\u0629 \u0623\u0648 \u0645\u062A\u0643\u0631\u0631\u0629", [], bad);
+    }
+  },
+  {
+    id: "P7-04",
+    title: "\xAB\u0623\u0645\u0633\xBB \u0647\u0648 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0627\u0644\u0644\u064A \u0642\u0628\u0644 \u0627\u0644\u0646\u0647\u0627\u0631\u062F\u0647 \u0628\u0627\u0644\u062A\u0642\u0648\u064A\u0645\u060C \u0645\u0634 \xAB\u062F\u0644\u0648\u0642\u062A\u064A \u2212 \u0662\u0664 \u0633\u0627\u0639\u0629\xBB",
+    run: async (c) => {
+      const bad = [];
+      const now = Date.now();
+      for (let ts = now - 30 * 864e5; ts < now + 240 * 864e5; ts += 36e5) {
+        const want = businessDayOf(businessDayRange(1, ts).start);
+        if (businessDayKeyDaysAgo(1, ts) !== want && bad.length < 5) bad.push(new Date(ts).toString());
+      }
+      c.check("P7-04", "\u0644\u062D\u0638\u0627\u062A \xAB\u0623\u0645\u0633\xBB \u0641\u064A\u0647\u0627 \u063A\u0644\u0637", [], bad);
+    }
+  },
+  {
+    id: "P7-05",
+    title: "\u062D\u0642\u0627\u064A\u0642 \u064A\u0648\u0645 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0633\u0627\u0639\u0629 \u0641\u064A \u0645\u0635\u0631: \u062E\u0645\u064A\u0633 \u0662\u0669 \u0623\u0643\u062A\u0648\u0628\u0631 \u0662\u0660\u0662\u0666 \u0637\u0648\u0644\u0647 \u0662\u0665 \u0633\u0627\u0639\u0629\u060C \u0648\u062C\u0645\u0639\u0629 \u0662\u0664 \u0623\u0628\u0631\u064A\u0644 \u0662\u0660\u0662\u0666 \u064A\u0648\u0645\u0647 \u0662\u0663 \u0633\u0627\u0639\u0629",
+    run: async (c) => {
+      let tz = "?";
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      } catch (e) {
+      }
+      if (tz !== "Africa/Cairo") return c.skip("P7-05", "\u062D\u0642\u0627\u064A\u0642 \u062A\u0648\u0642\u064A\u062A \u0627\u0644\u0642\u0627\u0647\u0631\u0629", `\u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644 \u0639\u0644\u0649 \u062A\u0648\u0642\u064A\u062A \xAB${tz}\xBB \u0645\u0634 \u0627\u0644\u0642\u0627\u0647\u0631\u0629 \u2014 \u0627\u0636\u0628\u0637 \u0627\u0644\u062A\u0648\u0642\u064A\u062A \u0639\u0644\u0649 \u0627\u0644\u0642\u0627\u0647\u0631\u0629 \u0648\u062C\u0631\u0651\u0628 \u062A\u0627\u0646\u064A`);
+      const H = 36e5;
+      const L = (y, m, d, h, mi) => new Date(y, m - 1, d, h, mi).getTime();
+      const fall = businessDayRange(0, L(2026, 10, 29, 12, 0));
+      const spring = businessDayRange(0, L(2026, 4, 23, 12, 0));
+      const week = currentCalendarWeekRange(L(2026, 10, 29, 12, 0));
+      const inv = L(2026, 10, 30, 2, 30);
+      c.check("P7-05", "\u0623\u0637\u0648\u0627\u0644 \u0627\u0644\u0623\u064A\u0627\u0645 \u0648\u0641\u0627\u062A\u0648\u0631\u0629 2:30 \u0627\u0644\u0641\u062C\u0631 \u0628\u0639\u062F \u0631\u062C\u0648\u0639 \u0627\u0644\u0633\u0627\u0639\u0629", { fallHours: 25, springHours: 23, weekHours: 169, lateInvoiceInsideItsDay: true }, { fallHours: (fall.end + 1 - fall.start) / H, springHours: (spring.end + 1 - spring.start) / H, weekHours: (week.end + 1 - week.start) / H, lateInvoiceInsideItsDay: inv >= fall.start && inv <= fall.end });
+    }
+  }
+];
+const SYS_PARTS = [
+  { id: "S1", title: "\u0627\u0644\u062E\u0637\u0648\u0629 1 \u2014 \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 (\u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0642\u062F\u064A\u0645)", legacy: true },
+  { id: "P1", title: "\u0627\u0644\u062C\u0632\u0621 1 \u2014 \u0627\u0644\u0628\u064A\u0639 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", checks: SYS_PART1_CHECKS },
+  { id: "P2", title: "\u0627\u0644\u062C\u0632\u0621 2 \u2014 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0648\u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0648\u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0639\u0644\u0651\u0642\u0629", checks: SYS_PART2_CHECKS, allowUnapproved: true },
+  { id: "P3", title: "\u0627\u0644\u062C\u0632\u0621 3 \u2014 \u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u062A\u0648\u0635\u064A\u0644", checks: SYS_PART3_CHECKS },
+  { id: "P4", title: "\u0627\u0644\u062C\u0632\u0621 4 \u2014 \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0648\u0627\u0644\u0623\u062E\u0637\u0627\u0621", checks: SYS_PART4_CHECKS },
+  { id: "P5", title: "\u0627\u0644\u062C\u0632\u0621 5 \u2014 \u0645\u0646\u0637\u0642 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0648\u0627\u0644\u0623\u0631\u0642\u0627\u0645", checks: SYS_PART5_CHECKS, allowUnapproved: true },
+  { id: "P6", title: "\u0627\u0644\u062C\u0632\u0621 6 \u2014 \u0627\u0644\u0628\u062D\u062B \u0648\u0627\u0644\u0645\u0633\u0648\u062F\u0627\u062A", checks: SYS_PART6_CHECKS, allowUnapproved: true },
+  { id: "P7", title: "\u0627\u0644\u062C\u0632\u0621 7 \u2014 \u064A\u0648\u0645 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0633\u0627\u0639\u0629 (\u062D\u062F\u0648\u062F \u0627\u0644\u064A\u0648\u0645 \u0648\u0627\u0644\u0623\u0633\u0628\u0648\u0639)", checks: SYS_PART7_CHECKS, allowUnapproved: true }
+];
+async function sysRunPart(part, acct, runId, log, sink) {
+  log(`
+\u2501\u2501 ${part.title} \u2501\u2501`);
+  if (part.legacy) {
+    const out = await runSystemTestStep1(acct.step1Role, log);
+    (out.results || []).forEach((r) => sink.results.push({ id: r.id, title: r.title, expected: r.expectedOk, actual: r.actualOk, match: r.match }));
+    return;
+  }
+  const token = await ensureAuth();
+  const c = sysMakeContext(acct, runId, log, sink, token);
+  for (const chk of part.checks) {
+    try {
+      await chk.run(c);
+    } catch (e) {
+      sink.results.push({ id: chk.id, title: chk.title, match: false, error: String(e && e.message || e) });
+      log(`\u{1F4A5} ${chk.id} ${chk.title}
+    \u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639: ${e && e.message || e}`);
+    }
+  }
+}
+function sysSummary(sink) {
+  const ok = sink.results.filter((r) => r.match === true).length;
+  const bad = sink.results.filter((r) => r.match === false).length;
+  const skipped = sink.results.filter((r) => r.skipped).length;
+  return { ok, bad, skipped };
+}
+(function mountSystemTestOverlay() {
+  try {
+    const btn = document.createElement("button");
+    btn.id = "sys-test-open";
+    btn.textContent = "\u{1F9EA}";
+    btn.setAttribute(
+      "style",
+      "position:fixed;left:10px;bottom:calc(90px + env(safe-area-inset-bottom, 0px));z-index:2147483646;width:44px;height:44px;border-radius:22px;border:0;background:#111827;color:#fff;font-size:20px;opacity:.85;"
+    );
+    document.body.appendChild(btn);
+    const panel = document.createElement("div");
+    panel.id = "sys-test-panel";
+    panel.setAttribute(
+      "style",
+      "display:none;position:fixed;inset:0;z-index:2147483647;background:#F9FAFB;color:#111827;overflow:auto;direction:rtl;padding:calc(28px + env(safe-area-inset-top, 0px)) 14px 24px;font:14px/1.6 system-ui,sans-serif;"
+    );
+    const bs = "padding:10px 14px;border:0;border-radius:8px;color:#fff;font-size:14px;margin:3px 0;";
+    panel.innerHTML = '<div style="font-weight:700;font-size:16px">\u{1F9EA} \u0641\u062D\u0648\u0635\u0627\u062A \u062D\u064A\u0629</div><div style="margin:8px 0;padding:8px;border-radius:8px;background:#FEF3C7;color:#78350F">\u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0628\u062A\u0643\u062A\u0628 \u0628\u064A\u0627\u0646\u0627\u062A \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0639\u0644\u0649 Firebase \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A (\u0643\u0644\u0647\u0627 \u0628\u0648\u0633\u0645 ' + SYSTEM_TEST_PREFIX + '). \u0645\u0645\u0643\u0646 \u062A\u0638\u0647\u0631 \u0631\u0633\u0627\u064A\u0644 \u062E\u0637\u0623 \u062D\u0645\u0631\u0627 \u0641\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0648\u0642\u062A \u0627\u0644\u0641\u062D\u0635 \u2014 \u0639\u0627\u062F\u064A. \u0634\u063A\u0651\u0644 \u0646\u0641\u0633 \u0627\u0644\u062C\u0632\u0621 \u0645\u0631\u0629 \u0628\u062D\u0633\u0627\u0628 \u0627\u0644\u0623\u062F\u0645\u0646 \u0648\u0645\u0631\u0629 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641.</div><div style="margin:8px 0;padding:8px;border-radius:8px;background:#FEE2E2;color:#7F1D1D"><b>\u062A\u062C\u0631\u0628\u0629 \u064A\u062F\u0648\u064A\u0629: \xAB\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u0645\u0645\u062A\u0644\u064A\u0629\xBB</b><br>\u062F\u0648\u0633 \u0627\u0644\u0632\u0631\u0627\u0631 \u062A\u062D\u062A\u060C \u0627\u0642\u0641\u0644 \u0627\u0644\u0625\u0646\u062A\u0631\u0646\u062A (\u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646)\u060C \u0648\u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u0629 \u062D\u0642\u064A\u0642\u064A\u0629 \u0645\u0646 \u0627\u0644\u0643\u0627\u0634\u064A\u0631: \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 \u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0635\u0648\u062A \u0627\u0644\u0625\u0646\u0630\u0627\u0631 \u0648\u0645\u0627\u064A\u0638\u0647\u0631\u0634 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB. \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0634 \u0647\u062A\u062A\u0633\u062C\u0644 \u0641\u064A \u0623\u064A \u0645\u0643\u0627\u0646 \u0644\u062D\u062F \u0645\u0627 \u062A\u0648\u0642\u0641 \u0627\u0644\u0645\u062D\u0627\u0643\u0627\u0629. \u0628\u062A\u062A\u0644\u063A\u064A \u0628\u0631\u0636\u0647 \u0644\u0648 \u0642\u0641\u0644\u062A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0648\u0641\u062A\u062D\u062A\u0647 \u062A\u0627\u0646\u064A.<br><button id="sys-test-full" style="padding:10px 14px;border:0;border-radius:8px;color:#fff;font-size:14px;margin:6px 0 2px;background:#B91C1C">\u0634\u063A\u0651\u0644 \u0645\u062D\u0627\u0643\u0627\u0629 \u0627\u0645\u062A\u0644\u0627\u0621 \u0627\u0644\u0645\u0633\u0627\u062D\u0629</button><div id="sys-test-full-state" style="font-size:12px">\u062F\u0644\u0648\u0642\u062A\u064A: \u0645\u0637\u0641\u064A\u0629 (\u0627\u0644\u062A\u062E\u0632\u064A\u0646 \u0634\u063A\u0627\u0644 \u0639\u0627\u062F\u064A)</div></div><div id="sys-test-acct" style="margin:6px 0;font-weight:700"></div><div id="sys-test-parts"></div><button id="sys-test-all" style="' + bs + 'background:#2563EB">\u0634\u063A\u0651\u0644 \u0643\u0644 \u0627\u0644\u0623\u062C\u0632\u0627\u0621</button> <button id="sys-test-copy" style="' + bs + 'background:#374151">\u0646\u0633\u062E \u0627\u0644\u062A\u0642\u0631\u064A\u0631</button> <button id="sys-test-close" style="' + bs + 'background:#6B7280">\u0625\u063A\u0644\u0627\u0642</button><pre id="sys-test-log" style="white-space:pre-wrap;word-break:break-word;margin-top:12px;font:12px/1.7 ui-monospace,monospace;direction:rtl;text-align:right"></pre>';
+    document.body.appendChild(panel);
+    let fullSim = null;
+    const fullBtn = panel.querySelector("#sys-test-full");
+    const fullState = panel.querySelector("#sys-test-full-state");
+    fullBtn.onclick = () => {
+      if (fullSim) {
+        fullSim.restore();
+        fullSim = null;
+        fullBtn.textContent = "\u0634\u063A\u0651\u0644 \u0645\u062D\u0627\u0643\u0627\u0629 \u0627\u0645\u062A\u0644\u0627\u0621 \u0627\u0644\u0645\u0633\u0627\u062D\u0629";
+        fullBtn.style.background = "#B91C1C";
+        fullState.textContent = "\u062F\u0644\u0648\u0642\u062A\u064A: \u0645\u0637\u0641\u064A\u0629 (\u0627\u0644\u062A\u062E\u0632\u064A\u0646 \u0634\u063A\u0627\u0644 \u0639\u0627\u062F\u064A)";
+      } else {
+        fullSim = sysFillQueueStorage();
+        fullBtn.textContent = "\u0648\u0642\u0651\u0641 \u0627\u0644\u0645\u062D\u0627\u0643\u0627\u0629";
+        fullBtn.style.background = "#15803D";
+        fullState.textContent = "\u062F\u0644\u0648\u0642\u062A\u064A: \u0634\u063A\u0651\u0627\u0644\u0629 \u26A0\uFE0F \u0623\u064A \u0641\u0627\u062A\u0648\u0631\u0629 \u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0645\u0634 \u0647\u062A\u062A\u062E\u0632\u0646";
+      }
+    };
+    const logEl = panel.querySelector("#sys-test-log");
+    const acctEl = panel.querySelector("#sys-test-acct");
+    const partsEl = panel.querySelector("#sys-test-parts");
+    const allBtn = panel.querySelector("#sys-test-all");
+    let acct = null;
+    let busy = false;
+    let lastReport = null;
+    const log = (line) => {
+      logEl.textContent += line + "\n";
+    };
+    const setBusy = (v) => {
+      busy = v;
+      panel.querySelectorAll("button[data-part], #sys-test-all").forEach((b) => {
+        b.disabled = v;
+      });
+    };
+    partsEl.innerHTML = SYS_PARTS.map((p) => `<button data-part="${p.id}" style="${bs}background:#0F766E;display:block;width:100%;text-align:right">\u25B6 ${p.title}</button>`).join("");
+    const refreshAccount = async () => {
+      acctEl.textContent = "\u0628\u0642\u0631\u0627 \u0627\u0644\u062D\u0633\u0627\u0628...";
+      acct = await sysDetectAccount();
+      acctEl.textContent = `\u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u062D\u0627\u0644\u064A: ${acct.label}`;
+    };
+    const runParts = async (partIds) => {
+      if (busy) return;
+      setBusy(true);
+      logEl.textContent = "";
+      try {
+        await refreshAccount();
+        log(`\u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${FIREBASE_PROJECT_ID}`);
+        if (FIREBASE_PROJECT_ID !== SYSTEM_TEST_EXPECTED_PROJECT) {
+          log("\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.");
+          return;
+        }
+        if (!acct.ok) {
+          log("\u26D4 \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0642\u0631\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 (\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644\u061F). \u062C\u0631\u0651\u0628 \u062A\u0627\u0646\u064A.");
+          return;
+        }
+        const unapproved = acct.role === "pending" || acct.role === "unknown";
+        const runId = Date.now().toString(36);
+        const sink = { results: [], leftovers: [] };
+        log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${acct.email} \u2014 \u0627\u0644\u0646\u0648\u0639: ${acct.role === "admin" ? "\u0623\u062F\u0645\u0646" : acct.role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : "\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647"} \u2014 \u0631\u0642\u0645 \u0627\u0644\u062A\u0634\u063A\u064A\u0644\u0629: ${runId}`);
+        for (const id of partIds) {
+          const part = SYS_PARTS.find((p) => p.id === id);
+          if (unapproved && !part.allowUnapproved) {
+            log(`
+\u2501\u2501 ${part.title} \u2501\u2501
+\u23ED\uFE0F \u0627\u062A\u062E\u0637\u064A\u062A\u0647: \u0627\u0644\u062C\u0632\u0621 \u062F\u0647 \u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0623\u062F\u0645\u0646 \u0623\u0648 \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647.`);
+            continue;
+          }
+          await sysRunPart(part, acct, runId, log, sink);
+        }
+        const s = sysSummary(sink);
+        log("");
+        log("\u2014 \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0627\u0636\u0644\u0629 (\u0645\u0634 \u0628\u062A\u062A\u0645\u0633\u062D \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642) \u2014");
+        if (sink.leftovers.length === 0) log("\u0645\u0641\u064A\u0634.");
+        else sink.leftovers.forEach((l) => log("\u2022 " + l));
+        log("");
+        log(`\u0627\u0644\u0646\u062A\u064A\u062C\u0629: \u2705 ${s.ok} \u0645\u0637\u0627\u0628\u0642 | \u274C ${s.bad} \u0645\u062E\u0627\u0644\u0641 | \u23ED\uFE0F ${s.skipped} \u0645\u062A\u062E\u0637\u064A`);
+        lastReport = { app: "FaAroon live-check", schema: 1, when: (/* @__PURE__ */ new Date()).toISOString(), project: FIREBASE_PROJECT_ID, runId, account: { email: acct.email, role: acct.role }, parts: partIds, summary: s, results: sink.results, leftovers: sink.leftovers };
+      } catch (e) {
+        log(`\u26D4 \u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639: ${e && e.message ? e.message : e}`);
+      } finally {
+        setBusy(false);
+      }
+    };
+    btn.onclick = async () => {
+      panel.style.display = "block";
+      if (!busy) await refreshAccount();
+    };
+    panel.querySelector("#sys-test-close").onclick = () => {
+      panel.style.display = "none";
+    };
+    partsEl.onclick = (e) => {
+      const id = e.target && e.target.getAttribute && e.target.getAttribute("data-part");
+      if (id) runParts([id]);
+    };
+    allBtn.onclick = () => runParts(SYS_PARTS.map((p) => p.id));
+    panel.querySelector("#sys-test-copy").onclick = async () => {
+      const text = logEl.textContent + (lastReport ? "\n\n--- JSON ---\n" + JSON.stringify(lastReport) : "");
+      try {
+        await navigator.clipboard.writeText(text);
+        log("\u{1F4CB} \u0627\u062A\u0646\u0633\u062E \u0627\u0644\u062A\u0642\u0631\u064A\u0631");
+      } catch (e) {
+        log("\u062A\u0639\u0630\u0631 \u0627\u0644\u0646\u0633\u062E \u062A\u0644\u0642\u0627\u0626\u064A\u060C \u0627\u0636\u063A\u0637 \u0645\u0637\u0648\u0644\u064B\u0627 \u0639\u0644\u0649 \u0627\u0644\u0646\u0635 \u0648\u0627\u0646\u0633\u062E\u0647.");
+      }
+    };
+  } catch (e) {
+  }
+})();
 const rootEl = document.getElementById("root");
 ReactDOM.createRoot(rootEl).render(/* @__PURE__ */ React.createElement(App, null));
