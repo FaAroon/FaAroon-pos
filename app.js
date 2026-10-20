@@ -349,6 +349,9 @@ async function doAuth() {
   }
   return authState.idToken;
 }
+function invalidateIdToken() {
+  authState = { ...authState, idToken: null, expiresAt: 0 };
+}
 async function ensureAuth() {
   if (authState.idToken && Date.now() < authState.expiresAt - 6e4) {
     return authState.idToken;
@@ -466,7 +469,7 @@ function fromFirestoreFields(fields) {
   });
   return obj;
 }
-const OFFLINE_QUEUE_KEY = "dev_alawadly_offline_queue_v1";
+const OFFLINE_QUEUE_KEY = "alawadly_offline_queue_v1";
 function getOfflineQueue() {
   try {
     return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || "[]");
@@ -477,7 +480,9 @@ function getOfflineQueue() {
 function setOfflineQueueRaw(q) {
   try {
     localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(q));
+    return true;
   } catch {
+    return false;
   }
 }
 function notifyQueueChange() {
@@ -495,22 +500,27 @@ function queueOfflineOp(collectionName, type, payload) {
   const id = type === "remove" ? payload : payload.id;
   const filtered = q.filter((op) => !(op.collectionName === collectionName && (op.type === "remove" ? op.payload : op.payload.id) === id));
   filtered.push({ qid: nextOfflineQueueId(), collectionName, type, payload, queuedAt: Date.now() });
-  setOfflineQueueRaw(filtered);
+  if (!setOfflineQueueRaw(filtered)) return false;
   notifyQueueChange();
+  return true;
 }
 function makeCollectionStore(collectionName) {
   const base = `${FIRESTORE_BASE}/${collectionName}`;
   async function attempt(type, payload) {
     try {
-      const token = await ensureAuth();
-      const res = type === "remove" ? await fetch(`${base}/${payload}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }) : await fetch(`${base}/${payload.id}`, {
+      const send = (token) => type === "remove" ? fetch(`${base}/${payload}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }) : fetch(`${base}/${payload.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ fields: toFirestoreFields(payload) })
       });
+      let res = await send(await ensureAuth());
+      if (res.status === 401) {
+        invalidateIdToken();
+        res = await send(await ensureAuth());
+      }
       if (!res.ok) {
         notifyStoreError(collectionName, await readErrorDetail(res));
-        if (res.status >= 500 || res.status === 429 || res.status === 408) return "retry";
+        if (res.status >= 500 || res.status === 429 || res.status === 408 || res.status === 401) return "retry";
         return "drop";
       }
       return "ok";
@@ -1139,7 +1149,7 @@ function todayStr() {
   const d = /* @__PURE__ */ new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-const CURRENT_BRANCH_KEY = "dev_faaroon_current_branch";
+const CURRENT_BRANCH_KEY = "faaroon_current_branch";
 function saveCurrentBranch(branchName) {
   try {
     localStorage.setItem(CURRENT_BRANCH_KEY, branchName || "");
@@ -1158,20 +1168,27 @@ function businessDayOf(ts) {
   if (d.getHours() < 3) d.setDate(d.getDate() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-function businessDayRange(daysAgo) {
-  const d = /* @__PURE__ */ new Date();
+function businessDayRange(daysAgo, nowTs) {
+  const d = nowTs === void 0 ? /* @__PURE__ */ new Date() : new Date(nowTs);
   if (d.getHours() < 3) d.setDate(d.getDate() - 1);
   d.setDate(d.getDate() - daysAgo);
   const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 3, 0, 0, 0).getTime();
-  return { start, end: start + 24 * 60 * 60 * 1e3 - 1 };
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 3, 0, 0, 0).getTime() - 1;
+  return { start, end };
 }
-function currentCalendarWeekRange() {
-  const d = /* @__PURE__ */ new Date();
+function businessDayKeyDaysAgo(daysAgo, nowTs) {
+  const d = nowTs === void 0 ? /* @__PURE__ */ new Date() : new Date(nowTs);
+  if (d.getHours() < 3) d.setDate(d.getDate() - 1);
+  d.setDate(d.getDate() - daysAgo);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function currentCalendarWeekRange(nowTs) {
+  const d = nowTs === void 0 ? /* @__PURE__ */ new Date() : new Date(nowTs);
   if (d.getHours() < 3) d.setDate(d.getDate() - 1);
   const daysSinceSaturday = (d.getDay() + 1) % 7;
-  const saturday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysSinceSaturday, 3, 0, 0, 0);
-  const start = saturday.getTime();
-  return { start, end: start + 7 * 24 * 60 * 60 * 1e3 - 1 };
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysSinceSaturday, 3, 0, 0, 0).getTime();
+  const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysSinceSaturday + 7, 3, 0, 0, 0).getTime() - 1;
+  return { start, end };
 }
 function calendarMonthRange(monthId) {
   const [y, m] = (monthId || todayStr().slice(0, 7)).split("-").map(Number);
@@ -1188,15 +1205,18 @@ function rangeToTimestamps(range) {
   return { start: businessDayRange(89).start, end: businessDayRange(0).end };
 }
 function businessDaysInRange(startTs, endTs) {
+  if (startTs > endTs) return [];
+  const endKey = businessDayOf(endTs);
+  const [y, m, d] = businessDayOf(startTs).split("-").map(Number);
+  const cursor = new Date(y, m - 1, d, 12, 0, 0, 0);
   const days = [];
-  let cursor = businessDayOf(startTs);
-  let cursorTs = startTs;
-  while (cursorTs <= endTs) {
-    days.push(cursor);
-    cursorTs += 24 * 60 * 60 * 1e3;
-    cursor = businessDayOf(cursorTs);
+  for (let i = 0; i < 4e3; i++) {
+    const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+    if (key > endKey) break;
+    days.push(key);
+    cursor.setDate(cursor.getDate() + 1);
   }
-  return [...new Set(days)];
+  return days;
 }
 function firestoreFieldPath(segments) {
   return segments.map((seg) => "`" + String(seg).replace(/\\/g, "\\\\").replace(/`/g, "\\`") + "`").join(".");
@@ -1247,7 +1267,7 @@ async function attemptInvoiceAggregateWrite(businessDay, branchName, kind, invoi
     return "retry";
   }
 }
-const AGG_QUEUE_KEY = "dev_faaroon_agg_queue_v1";
+const AGG_QUEUE_KEY = "faaroon_agg_queue_v1";
 let aggQueueIdSeq = 0;
 function nextAggQueueId() {
   return `${Date.now()}_${++aggQueueIdSeq}`;
@@ -1393,8 +1413,8 @@ async function batchGetImages(ids) {
     return {};
   }
 }
-const SESSION_KEY = "dev_alawadly_session";
-const SESSION_REFRESH_KEY = "dev_alawadly_auth_refresh";
+const SESSION_KEY = "alawadly_session";
+const SESSION_REFRESH_KEY = "alawadly_auth_refresh";
 function saveSession(user) {
   try {
     localStorage.setItem(SESSION_KEY, JSON.stringify({ id: user.id }));
@@ -1423,7 +1443,7 @@ function clearSession() {
   }
   clearAuthTokens();
 }
-const CASHIER_INVOICES_KEY = "dev_faaroon_cashier_invoices";
+const CASHIER_INVOICES_KEY = "faaroon_cashier_invoices";
 function saveCashierInvoices(invoices) {
   try {
     localStorage.setItem(CASHIER_INVOICES_KEY, JSON.stringify({ invoices }));
@@ -1521,7 +1541,38 @@ function playBeep(type = "success") {
   } catch (e) {
   }
 }
-const DATA_CACHE_PREFIX = "dev_faaroon_cache_";
+function playUnsavedAlarm() {
+  try {
+    const ctx = getAudioCtx();
+    if (ctx) {
+      [[988, 0], [740, 0.26], [988, 0.52]].forEach(([freq, at]) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = "square";
+        const t = ctx.currentTime + at;
+        osc.frequency.setValueAtTime(freq, t);
+        gain.gain.setValueAtTime(1e-4, t);
+        gain.gain.linearRampToValueAtTime(0.35, t + 0.01);
+        gain.gain.setValueAtTime(0.35, t + 0.14);
+        gain.gain.exponentialRampToValueAtTime(1e-3, t + 0.2);
+        osc.start(t);
+        osc.stop(t + 0.21);
+        osc.onended = () => {
+          osc.disconnect();
+          gain.disconnect();
+        };
+      });
+    }
+  } catch (e) {
+  }
+  try {
+    if (navigator.vibrate) navigator.vibrate([200, 60, 200, 60, 200]);
+  } catch (e) {
+  }
+}
+const DATA_CACHE_PREFIX = "faaroon_cache_";
 function saveDataCache(key, data) {
   try {
     localStorage.setItem(DATA_CACHE_PREFIX + key, JSON.stringify(data));
@@ -1537,7 +1588,7 @@ function loadDataCache(key) {
   }
 }
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const IDB_NAME = "dev_faaroon_idb";
+const IDB_NAME = "faaroon_idb";
 const IDB_STORE = "cache";
 function idbOpen() {
   return new Promise((resolve, reject) => {
@@ -1581,7 +1632,7 @@ async function idbSet(key, value) {
   }
 }
 const DATA_EPOCH = "2026-10-real-email-accounts";
-const DATA_EPOCH_KEY = "dev_faaroon_data_epoch";
+const DATA_EPOCH_KEY = "faaroon_data_epoch";
 function purgeLocalDataForNewEpoch() {
   try {
     if (localStorage.getItem(DATA_EPOCH_KEY) === DATA_EPOCH) return false;
@@ -2963,6 +3014,13 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
   const [confirmForm, setConfirmForm] = useState(EMPTY_CONFIRM_FORM);
   const [confirmError, setConfirmError] = useState("");
   const [lastSale, setLastSale] = useState(null);
+  const [unsavedSale, setUnsavedSale] = useState(null);
+  const [unsavedPrintError, setUnsavedPrintError] = useState("");
+  useEffect(() => {
+    if (!unsavedSale) return void 0;
+    const t = setInterval(playUnsavedAlarm, 4e3);
+    return () => clearInterval(t);
+  }, [unsavedSale]);
   const [showReceiptPreview, setShowReceiptPreview] = useState(false);
   const [notFoundToast, setNotFoundToast] = useState(false);
   const [mergePrompt, setMergePrompt] = useState(null);
@@ -3207,7 +3265,20 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
       playBeep("error");
       return;
     }
-    if (result === "retry") queueOfflineOp("sales_col", "upsert", sale);
+    if (result === "retry" && !queueOfflineOp("sales_col", "upsert", sale)) {
+      checkoutBusyRef.current = false;
+      setCheckoutBusy(false);
+      setShowCheckout(false);
+      setUnsavedSale(sale);
+      setUnsavedPrintError("");
+      playUnsavedAlarm();
+      try {
+        window.scrollTo(0, 0);
+      } catch {
+      }
+      return;
+    }
+    setUnsavedSale(null);
     recordInvoiceAggregate(businessDayOf(sale.createdAt), sale.branchName, "sales", sale.id, sale.total);
     setSales((s) => [...s, sale]);
     playBeep("success");
@@ -3266,7 +3337,20 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
       playBeep("error");
       return;
     }
-    if (result === "retry") queueOfflineOp("sales_col", "upsert", sale);
+    if (result === "retry" && !queueOfflineOp("sales_col", "upsert", sale)) {
+      checkoutBusyRef.current = false;
+      setCheckoutBusy(false);
+      setShowCheckout(false);
+      setUnsavedSale(sale);
+      setUnsavedPrintError("");
+      playUnsavedAlarm();
+      try {
+        window.scrollTo(0, 0);
+      } catch {
+      }
+      return;
+    }
+    setUnsavedSale(null);
     setSales((s) => [...s, sale]);
     playBeep("success");
     setLastSale(sale);
@@ -3283,7 +3367,18 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
     setDeliveryError("");
     setQuery("");
   };
-  return /* @__PURE__ */ React.createElement("div", { className: "shop-root" }, /* @__PURE__ */ React.createElement(Header, { user, onLogout: () => setView("logout"), onBack: () => setView("menu"), title: "\u0627\u0644\u0643\u0627\u0634\u064A\u0631", onNav: setView }), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 py-2 fade-up pb-6 lg:grid lg:grid-cols-[14rem_28rem_14rem] lg:justify-center lg:gap-6 lg:items-start" }, /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex lg:flex-col lg:gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewInvoicePicker(true), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "Plus", size: 15 }), " \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"), /* @__PURE__ */ React.createElement("button", { onClick: () => setView("returns"), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold text-rose-400" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 15 }), " \u0645\u0631\u062A\u062C\u0639")), /* @__PURE__ */ React.createElement("div", { className: "lg:w-full" }, usingCachedProducts && /* @__PURE__ */ React.createElement("div", { className: "bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 mb-3 text-xs text-amber-300 font-bold text-center" }, "\u{1F4F4} \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0646\u062A \u2014 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u062F\u064A \u0622\u062E\u0631 \u0646\u0633\u062E\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u0627\u0644\u0641\u0648\u0646"), productsLoading && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement(SkeletonRows, { count: 5, height: 60 })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 overflow-x-auto mb-4 pb-1" }, invoices.map((inv) => /* @__PURE__ */ React.createElement("div", { key: inv.id, className: `shrink-0 rounded-xl flex items-center ${activeId === inv.id ? "btn-sky" : "btn-ghost"}` }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "shop-root" }, /* @__PURE__ */ React.createElement(Header, { user, onLogout: () => setView("logout"), onBack: () => setView("menu"), title: "\u0627\u0644\u0643\u0627\u0634\u064A\u0631", onNav: setView }), unsavedSale && /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 pt-2" }, /* @__PURE__ */ React.createElement("div", { className: "rounded-xl p-3 border-2 border-rose-500 bg-rose-950/80 text-rose-100", role: "alert" }, /* @__PURE__ */ React.createElement("p", { className: "font-extrabold text-rose-300 text-sm mb-1" }, "\u26A0\uFE0F \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062F\u064A \u0644\u0633\u0647 \u0645\u0627\u062A\u0633\u062C\u0644\u062A\u0634 \u062E\u0627\u0644\u0635!"), /* @__PURE__ */ React.createElement("p", { className: "text-xs leading-relaxed mb-2" }, "\u0645\u0641\u064A\u0634 \u0646\u062A\u060C \u0648\u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u0645\u0645\u062A\u0644\u064A\u0629 \u0641\u0645\u0642\u062F\u0631\u0646\u0627\u0634 \u0646\u062D\u0641\u0638\u0647\u0627 \u062D\u062A\u0649 \u0639\u0644\u0649 \u0627\u0644\u062C\u0647\u0627\u0632. ", /* @__PURE__ */ React.createElement("span", { className: "font-bold" }, "\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0647\u062A\u0636\u064A\u0639 \u0644\u0648 \u0627\u0644\u062C\u0647\u0627\u0632 \u0645\u0627 \u0627\u062A\u0648\u0635\u0651\u0644\u0634 \u0628\u0627\u0644\u0646\u062A \u0623\u0648 \u0627\u0644\u0645\u0633\u0627\u062D\u0629 \u0645\u0627 \u0627\u062A\u0641\u0636\u0651\u062A\u0634 \u0628\u0633\u0631\u0639\u0629."), " \u0648\u0635\u0651\u0644 \u0627\u0644\u0646\u062A \u0623\u0648 \u0641\u0636\u0651\u064A \u0645\u0633\u0627\u062D\u0629 (\u0627\u0645\u0633\u062D \u0635\u0648\u0631/\u0645\u0644\u0641\u0627\u062A/\u062A\u0637\u0628\u064A\u0642\u0627\u062A)\u060C \u0648\u0628\u0639\u062F\u0647\u0627 \u062F\u0648\u0633 \xAB\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0628\u064A\u0639\xBB \u062A\u0627\u0646\u064A. \u0627\u0644\u0633\u0644\u0629 \u0632\u064A \u0645\u0627 \u0647\u064A \u0648\u0645\u0641\u064A\u0634 \u062D\u0627\u062C\u0629 \u0627\u062A\u0645\u0633\u062D\u062A. \u0648\u0644\u0648 \u0627\u0644\u0639\u0645\u064A\u0644 \u0645\u0633\u062A\u0639\u062C\u0644 \u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062F\u0644\u0648\u0642\u062A\u064A."), unsavedPrintError && /* @__PURE__ */ React.createElement("p", { className: "text-xs text-amber-300 mb-2" }, unsavedPrintError), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2" }, /* @__PURE__ */ React.createElement(
+    "button",
+    {
+      onClick: () => printSaleReceipt(unsavedSale, (reason) => {
+        setUnsavedPrintError(reason === "popup" ? "\u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0645\u0634 \u0642\u0627\u062F\u0631 \u064A\u0641\u062A\u062D \u0634\u0627\u0634\u0629 \u0627\u0644\u0637\u0628\u0627\u0639\u0629 \u2014 \u062A\u0623\u0643\u062F \u0625\u0646 \u0627\u0644\u0640pop-ups \u0645\u0633\u0645\u0648\u062D\u0629" : "\u062D\u0635\u0644\u062A \u0645\u0634\u0643\u0644\u0629 \u0623\u062B\u0646\u0627\u0621 \u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0644\u0644\u0637\u0627\u0628\u0639\u0629");
+        setTimeout(() => setUnsavedPrintError(""), 4e3);
+      }),
+      className: "flex-1 rounded-lg py-2 font-bold text-sm bg-rose-500 text-white flex items-center justify-center gap-1.5"
+    },
+    /* @__PURE__ */ React.createElement(Icon, { name: "Printer", size: 15 }),
+    " \u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629"
+  ), /* @__PURE__ */ React.createElement("button", { onClick: () => setUnsavedSale(null), className: "rounded-lg px-3 py-2 font-bold text-xs border border-rose-400/50 text-rose-200" }, "\u0625\u062E\u0641\u0627\u0621")))), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 py-2 fade-up pb-6 lg:grid lg:grid-cols-[14rem_28rem_14rem] lg:justify-center lg:gap-6 lg:items-start" }, /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex lg:flex-col lg:gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewInvoicePicker(true), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "Plus", size: 15 }), " \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"), /* @__PURE__ */ React.createElement("button", { onClick: () => setView("returns"), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold text-rose-400" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 15 }), " \u0645\u0631\u062A\u062C\u0639")), /* @__PURE__ */ React.createElement("div", { className: "lg:w-full" }, usingCachedProducts && /* @__PURE__ */ React.createElement("div", { className: "bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 mb-3 text-xs text-amber-300 font-bold text-center" }, "\u{1F4F4} \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0646\u062A \u2014 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u062F\u064A \u0622\u062E\u0631 \u0646\u0633\u062E\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u0627\u0644\u0641\u0648\u0646"), productsLoading && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement(SkeletonRows, { count: 5, height: 60 })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 overflow-x-auto mb-4 pb-1" }, invoices.map((inv) => /* @__PURE__ */ React.createElement("div", { key: inv.id, className: `shrink-0 rounded-xl flex items-center ${activeId === inv.id ? "btn-sky" : "btn-ghost"}` }, /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => {
@@ -5560,7 +5655,7 @@ const MY_INVOICES_PAGE_SIZE = 6;
 function invoiceDayLabel(ts) {
   const day = businessDayOf(ts);
   const today = businessDayOf(Date.now());
-  const yesterday = businessDayOf(Date.now() - 24 * 60 * 60 * 1e3);
+  const yesterday = businessDayKeyDaysAgo(1);
   if (day === today) return "\u0627\u0644\u064A\u0648\u0645";
   if (day === yesterday) return "\u0623\u0645\u0633";
   return new Date(ts).toLocaleDateString("ar-EG", { day: "numeric", month: "long" });
@@ -5692,7 +5787,7 @@ function MyInvoicesScreen({ user, sales, setView }) {
 function returnDayLabel(ts) {
   const day = businessDayOf(ts);
   const today = businessDayOf(Date.now());
-  const yesterday = businessDayOf(Date.now() - 24 * 60 * 60 * 1e3);
+  const yesterday = businessDayKeyDaysAgo(1);
   if (day === today) return "\u0627\u0644\u064A\u0648\u0645";
   if (day === yesterday) return "\u0623\u0645\u0633";
   return new Date(ts).toLocaleDateString("ar-EG", { day: "numeric", month: "long" });
@@ -5896,942 +5991,5 @@ function ReturnsScreen({ user, sales, setView }) {
     );
   })), totalPages > 1 && /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-center gap-4 mt-4" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setPage((p) => Math.max(0, p - 1)), disabled: pageSafe === 0, className: "btn-ghost rounded-xl p-2 disabled:opacity-30" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16, style: { transform: "rotate(180deg)" } })), /* @__PURE__ */ React.createElement("span", { className: "text-xs text-[#94A3B8]" }, pageSafe + 1, " \u0645\u0646 ", totalPages), /* @__PURE__ */ React.createElement("button", { onClick: () => setPage((p) => Math.min(totalPages - 1, p + 1)), disabled: pageSafe >= totalPages - 1, className: "btn-ghost rounded-xl p-2 disabled:opacity-30" }, /* @__PURE__ */ React.createElement(Icon, { name: "ChevronLeft", size: 16 })))));
 }
-const FAAROON_DEV_BUILD = true;
-const SYSTEM_TEST_EXPECTED_PROJECT = "alawadly-53e7d";
-const SYSTEM_TEST_PREFIX = "__sys_test_";
-const SYSTEM_TEST_AMOUNT = 7;
-(function mountBetaBanner() {
-  try {
-    const bar = document.createElement("div");
-    bar.id = "faaroon-beta-banner";
-    bar.textContent = "\u{1F9EA} \u0646\u0633\u062E\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 / Beta \u2014 Firebase \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A (\u0628\u064A\u0627\u0646\u0627\u062A\u0647 \u062A\u062C\u0631\u064A\u0628\u064A\u0629)";
-    bar.setAttribute(
-      "style",
-      "position:fixed;top:0;left:0;right:0;z-index:2147483647;padding:calc(2px + env(safe-area-inset-top, 0px)) 8px 2px;background:#DC2626;color:#FFFFFF;font:700 11px/16px system-ui,sans-serif;text-align:center;pointer-events:none;"
-    );
-    document.body.appendChild(bar);
-  } catch (e) {
-  }
-})();
-async function sysTestHttp(method, url, token, body) {
-  const res = await fetch(url, {
-    method,
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: body ? JSON.stringify(body) : void 0
-  });
-  let json = null;
-  try {
-    json = await res.json();
-  } catch (e) {
-    json = null;
-  }
-  let detail = "";
-  if (!res.ok && json && json.error) detail = `${json.error.status || ""} ${json.error.message || ""}`.trim();
-  return { ok: res.ok, status: res.status, detail, json };
-}
-function sysTestExpectations(role) {
-  const canRead = role === "admin" || role === "viewReports";
-  const approved = role !== "pending";
-  return { commitOk: approved, readOk: canRead };
-}
-async function runSystemTestStep1(role, log) {
-  const runId = Date.now().toString(36);
-  const testDay = `${SYSTEM_TEST_PREFIX}${runId}`;
-  const invoiceId = `${SYSTEM_TEST_PREFIX}${runId}_inv`;
-  const branch = "\u0627\u062E\u062A\u0628\u0627\u0631";
-  const exp = sysTestExpectations(role);
-  const results = [];
-  const record = (id, title, expectedOk, actualOk, yes, no, extra) => {
-    const match = expectedOk === actualOk;
-    results.push({ id, title, expectedOk, actualOk, match });
-    log(`${match ? "\u2705" : "\u274C"} ${id} ${title}
-    \u0627\u0644\u0645\u062A\u0648\u0642\u0639: ${expectedOk ? yes : no} | \u0627\u0644\u0641\u0639\u0644\u064A: ${actualOk ? yes : no}${extra ? "\n    " + extra : ""}`);
-  };
-  log(`\u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${FIREBASE_PROJECT_ID}`);
-  if (FIREBASE_PROJECT_ID !== SYSTEM_TEST_EXPECTED_PROJECT) {
-    log(`\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.`);
-    return { aborted: true, results };
-  }
-  const token = await ensureAuth();
-  let who = "\u063A\u064A\u0631 \u0645\u0639\u0631\u0648\u0641";
-  try {
-    const claims = decodeIdTokenClaims(token) || {};
-    who = `${claims.email || "\u0628\u062F\u0648\u0646 \u0625\u064A\u0645\u064A\u0644"} - verified: ${claims.emailVerified === true ? "\u0646\u0639\u0645" : "\u0644\u0627"}`;
-  } catch (e) {
-    who = "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628";
-  }
-  log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${who}`);
-  log(`\u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u0645\u062E\u062A\u0627\u0631 \u0644\u0644\u0641\u062D\u0635: ${role}`);
-  const realDay = businessDayOf(Date.now());
-  const monthId = realDay.slice(0, 7);
-  const resourceRoot = FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "");
-  const monthCol = ["monthly", "aggregates", "col"].join("_");
-  const monthDocUrl = `${FIRESTORE_BASE}/${monthCol}/${monthId}`;
-  const monthDocName = `${resourceRoot}/monthly_aggregates_col/${monthId}`;
-  const guardName = `${resourceRoot}/invoice_aggregate_writes_col/${invoiceId}`;
-  const fieldPath = firestoreFieldPath(["days", testDay, branch, "sales", invoiceId]);
-  log("\u2014 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u0644\u0644\u064A \u0647\u0644\u0645\u0633\u0647\u0627 \u2014");
-  log(`\u0661- invoice_aggregate_writes_col/${invoiceId}  \u0625\u0646\u0634\u0627\u0621\u060C \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0630\u0641 \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642`);
-  log(`\u0662- monthly_aggregates_col/${monthId}  \u062D\u0642\u0644 days.${testDay} \u0641\u0642\u0637`);
-  log("");
-  const commitBody = () => ({
-    writes: [
-      {
-        update: {
-          name: guardName,
-          fields: toFirestoreFields({ invoiceId, businessDay: testDay, branch, kind: "sales", amount: SYSTEM_TEST_AMOUNT })
-        },
-        currentDocument: { exists: false }
-      },
-      {
-        transform: {
-          document: monthDocName,
-          fieldTransforms: [{ fieldPath, increment: toFirestoreValue(SYSTEM_TEST_AMOUNT) }]
-        }
-      }
-    ]
-  });
-  const safe = async (fn) => {
-    try {
-      return await fn();
-    } catch (e) {
-      return { ok: false, status: 0, detail: `network: ${e.message}`, json: null };
-    }
-  };
-  const t1 = await safe(() => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, commitBody()));
-  record("S1-T1", "\u062A\u062D\u062F\u064A\u062B \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0628\u0640:commit \u0628\u062F\u0648\u0646 \u0642\u0631\u0627\u0621\u0629", exp.commitOk, t1.ok, "\u0646\u062C\u062D", "\u0627\u062A\u0631\u0641\u0636", `HTTP ${t1.status} ${t1.detail}`);
-  const t2 = await safe(() => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, commitBody()));
-  record("S1-T2", "\u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0640commit \u0644\u0627\u0632\u0645 \u062A\u062A\u0631\u0641\u0636", false, t2.ok, "\u0646\u062C\u062D", "\u0627\u062A\u0631\u0641\u0636", `HTTP ${t2.status} ${t2.detail}`);
-  const t3 = await safe(() => sysTestHttp("GET", monthDocUrl, token));
-  record("S1-T3", "\u0642\u0631\u0627\u0621\u0629 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631", exp.readOk, t3.ok, "\u0646\u062C\u062D\u062A", "\u0627\u062A\u0631\u0641\u0636\u062A", `HTTP ${t3.status} ${t3.detail}`);
-  if (t3.ok && t3.json && t3.json.fields) {
-    let value = null;
-    try {
-      const days = fromFirestoreFields(t3.json.fields).days || {};
-      const node = days[testDay] && days[testDay][branch] && days[testDay][branch].sales;
-      value = node ? node[invoiceId] : null;
-    } catch (e) {
-      value = null;
-    }
-    record("S1-T4", "\u0627\u0644\u0642\u064A\u0645\u0629 \u0627\u0644\u0645\u0633\u062C\u0644\u0629 = \u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633", true, value === SYSTEM_TEST_AMOUNT, "\u062A\u0633\u0627\u0648\u064A " + SYSTEM_TEST_AMOUNT, "\u0645\u062E\u062A\u0644\u0641\u0629: " + String(value));
-  } else {
-    log("\u23ED\uFE0F S1-T4 \u0627\u062A\u062E\u0637\u0649: \u0627\u0644\u062D\u0633\u0627\u0628 \u062F\u0647 \u0645\u0627 \u0642\u0631\u0627\u0634 \u0627\u0644\u0645\u0633\u062A\u0646\u062F\u060C \u0641\u0645\u0634 \u0647\u064A\u0646\u0641\u0639 \u0623\u062A\u062D\u0642\u0642 \u0645\u0646 \u0627\u0644\u0642\u064A\u0645\u0629 \u0645\u0646 \u0647\u0646\u0627.");
-  }
-  if (t1.ok) {
-    const t5 = await safe(
-      () => sysTestHttp("POST", `${FIRESTORE_BASE}:commit`, token, {
-        writes: [{ update: { name: monthDocName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
-      })
-    );
-    log(`${t5.ok ? "\u{1F9F9}" : "\u26A0\uFE0F"} S1-T5 \u062A\u0646\u0638\u064A\u0641 \u062D\u0642\u0644 days.${testDay}: ${t5.ok ? "\u062A\u0645" : "\u0645\u0627 \u0627\u062A\u0645\u0633\u062D\u0634"} | HTTP ${t5.status} ${t5.detail}`);
-    if (!t5.ok) log(`   \u0627\u0645\u0633\u062D \u0627\u0644\u062D\u0642\u0644 \u062F\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console: monthly_aggregates_col/${monthId} \u2190 days \u2190 ${testDay}`);
-  } else {
-    log("\u23ED\uFE0F S1-T5 \u0645\u0641\u064A\u0634 \u062A\u0646\u0638\u064A\u0641: \u0627\u0644\u0643\u062A\u0627\u0628\u0629 \u0627\u0644\u0623\u0648\u0644\u0649 \u0645\u0627 \u0646\u062C\u062D\u062A\u0634.");
-  }
-  log("");
-  log("\u2014 \u062A\u0646\u0638\u064A\u0641 \u064A\u062F\u0648\u064A \u0645\u0637\u0644\u0648\u0628 \u0645\u0646 Firebase Console \u2014");
-  if (t1.ok) log(`\u0627\u0645\u0633\u062D \u0627\u0644\u0645\u0633\u062A\u0646\u062F: invoice_aggregate_writes_col/${invoiceId}`);
-  else log("\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u0627\u062A\u0643\u062A\u0628\u062A.");
-  const bad = results.filter((r) => !r.match).length;
-  log("");
-  log(bad === 0 ? `\u0627\u0644\u0646\u062A\u064A\u062C\u0629: ${results.length} \u0641\u062D\u0648\u0635\u0627\u062A \u0645\u0637\u0627\u0628\u0642\u0629 \u0644\u0644\u0645\u062A\u0648\u0642\u0639` : `\u0627\u0644\u0646\u062A\u064A\u062C\u0629: ${bad} \u0641\u062D\u0635 \u0645\u062E\u0627\u0644\u0641 \u0644\u0644\u0645\u062A\u0648\u0642\u0639 \u0645\u0646 ${results.length}`);
-  return { aborted: false, results };
-}
-const SYS_OLD_TS = 9466848e5;
-const sysFmt = (v) => typeof v === "string" ? v : JSON.stringify(v);
-async function sysDetectAccount() {
-  try {
-    const token = await ensureAuth();
-    const claims = decodeIdTokenClaims(token) || {};
-    const uid2 = claims.uid || null;
-    const email = claims.email || "";
-    const me = uid2 ? await fetchUserDocById(uid2) : null;
-    if (me === void 0) return { ok: false, role: "offline", email, label: "\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u2014 \u0645\u0642\u062F\u0631\u062A\u0634 \u0623\u0639\u0631\u0641 \u0646\u0648\u0639 \u0627\u0644\u062D\u0633\u0627\u0628" };
-    if (!me) return { ok: true, role: "unknown", email, name: "", step1Role: "pending", label: `${email} \u2014 \u0645\u0641\u064A\u0634 \u0633\u062C\u0644 \u062D\u0633\u0627\u0628` };
-    const role = me.status !== "approved" ? "pending" : me.role === "admin" ? "admin" : "employee";
-    const step1Role = role === "admin" ? "admin" : role === "pending" ? "pending" : me.permissions && me.permissions.viewReports ? "viewReports" : "cashier";
-    const roleLabel = role === "admin" ? "\u0623\u062F\u0645\u0646" : role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : `\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 (${me.status || "?"})`;
-    return { ok: true, role, step1Role, uid: uid2, email, name: me.name || "", status: me.status, label: `${me.name || email} \u2014 ${roleLabel}` };
-  } catch (e) {
-    return { ok: false, role: "error", email: "", label: "\u062A\u0639\u0630\u0631 \u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u062D\u0633\u0627\u0628" };
-  }
-}
-function sysMakeContext(acct, runId, log, sink, token) {
-  const c = {
-    role: acct.role,
-    unapproved: acct.role === "pending" || acct.role === "unknown",
-    runId,
-    shared: {},
-    http: async (method, url, body) => {
-      try {
-        return await sysTestHttp(method, url, token, body);
-      } catch (e) {
-        return { ok: false, status: 0, detail: `network: ${e.message}`, json: null };
-      }
-    },
-    docUrl: (col, id) => `${FIRESTORE_BASE}/${col}/${id}`,
-    getDoc: async (col, id) => {
-      const r = await c.http("GET", c.docUrl(col, id));
-      return { status: r.status, data: r.ok && r.json && r.json.fields ? fromFirestoreFields(r.json.fields) : null };
-    },
-    putDoc: (col, id, obj) => c.http("PATCH", c.docUrl(col, id), { fields: toFirestoreFields(obj) }),
-    check: (id, title, expected, actual, extra) => {
-      const match = JSON.stringify(expected) === JSON.stringify(actual);
-      sink.results.push({ id, title, expected, actual, match });
-      log(`${match ? "\u2705" : "\u274C"} ${id} ${title}
-    \u0627\u0644\u0645\u062A\u0648\u0642\u0639: ${sysFmt(expected)} | \u0627\u0644\u0641\u0639\u0644\u064A: ${sysFmt(actual)}${extra ? "\n    " + extra : ""}`);
-      return match;
-    },
-    skip: (id, title, why) => {
-      sink.results.push({ id, title, skipped: true, why });
-      log(`\u23ED\uFE0F ${id} ${title} \u2014 ${why}`);
-    },
-    note: (t) => log(`   \u2139\uFE0F ${t}`),
-    leftover: (path, why) => sink.leftovers.push(`${path} \u2014 ${why}`),
-    sale: (tag, extra) => {
-      const id = `${SYSTEM_TEST_PREFIX}${runId}_${tag}`;
-      return Object.assign(
-        {
-          employeeName: `${SYSTEM_TEST_PREFIX}other_employee`,
-          customerName: null,
-          branchName: "\u0627\u062E\u062A\u0628\u0627\u0631",
-          invoiceNumber: 0,
-          tierKey: "retail",
-          items: [{ productName: `${SYSTEM_TEST_PREFIX}item`, unitPrice: 7, qty: 1, lineTotal: 7 }],
-          total: 7,
-          paid: true,
-          fulfillment: "pickup",
-          paymentMethod: "cash",
-          splitTransferMethod: null,
-          cashAmount: null,
-          transferAmount: null,
-          createdAt: SYS_OLD_TS
-        },
-        extra || {},
-        { id }
-      );
-    }
-  };
-  return c;
-}
-const SYS_PART1_CHECKS = [
-  {
-    id: "P1-01",
-    title: "\u062D\u0641\u0638 \u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u0627\u0633\u0645 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A (H1/H2 \u2014 \u0645\u0633\u0645\u0648\u062D \u0628\u0627\u0644\u062A\u0635\u0645\u064A\u0645)",
-    run: async (c) => {
-      const s = c.sale("c1");
-      const r = await salesStore._attempt("upsert", s);
-      c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
-      c.shared.sale = s;
-      c.check("P1-01", "\u062D\u0641\u0638 \u0641\u0627\u062A\u0648\u0631\u0629 \u0627\u0633\u062A\u0644\u0627\u0645 (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631)", "ok", r);
-    }
-  },
-  {
-    id: "P1-02",
-    title: "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629: \u0643\u0644 \u0627\u0644\u062D\u0642\u0648\u0644 \u0632\u064A \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A (E6)",
-    run: async (c) => {
-      const s = c.shared.sale;
-      if (!s) return c.skip("P1-02", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", "\u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634 \u0641\u064A \u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647");
-      const g = await c.getDoc("sales_col", s.id);
-      const d = g.data || {};
-      const same = g.status === 200 && d.id === s.id && d.total === 7 && d.employeeName === s.employeeName && d.paymentMethod === "cash" && d.fulfillment === "pickup" && d.paid === true && d.branchName === "\u0627\u062E\u062A\u0628\u0627\u0631" && d.createdAt === SYS_OLD_TS && Array.isArray(d.items) && d.items.length === 1 && d.items[0].lineTotal === 7 && d.items[0].qty === 1;
-      c.check("P1-02", "\u0627\u0644\u062D\u0642\u0648\u0644 \u0627\u0644\u0645\u062D\u0641\u0648\u0638\u0629 \u0645\u0637\u0627\u0628\u0642\u0629", true, same, `HTTP ${g.status}`);
-    }
-  },
-  {
-    id: "P1-03",
-    title: "\u0643\u0644 \u0637\u0631\u0642 \u0627\u0644\u062F\u0641\u0639 \u0628\u062A\u062A\u062E\u0632\u0646 \u0635\u062D\u060C \u0648\u0627\u0644\u062F\u0641\u0639 \u0627\u0644\u0645\u0642\u0633\u0651\u0645 (E1/E2)",
-    run: async (c) => {
-      const variants = [
-        ["cash", {}],
-        ["vodafone_cash", {}],
-        ["instapay", {}],
-        ["split", { splitTransferMethod: "instapay", cashAmount: 3, transferAmount: 4 }]
-      ];
-      const saved = [];
-      const back = [];
-      for (const [pm, extra] of variants) {
-        const s = c.sale("pm_" + pm, Object.assign({ paymentMethod: pm }, extra));
-        saved.push(await salesStore._attempt("upsert", s));
-        c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
-        const g = await c.getDoc("sales_col", s.id);
-        const d = g.data || {};
-        back.push(d.paymentMethod === pm && (pm !== "split" || d.splitTransferMethod === "instapay" && d.cashAmount === 3 && d.transferAmount === 4 && d.cashAmount + d.transferAmount === d.total));
-      }
-      c.check("P1-03", "\u0627\u0644\u062D\u0641\u0638 \u062B\u0645 \u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0644\u0643\u0644 \u0637\u0631\u064A\u0642\u0629 \u062F\u0641\u0639", { saved: ["ok", "ok", "ok", "ok"], back: [true, true, true, true] }, { saved, back });
-    }
-  },
-  {
-    id: "P1-04",
-    title: "\u062A\u0639\u062F\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0645\u0631\u0641\u0648\u0636 \u0644\u0623\u064A \u062D\u062F \u062D\u062A\u0649 \u0627\u0644\u0623\u062F\u0645\u0646 (H3)",
-    run: async (c) => {
-      const s = c.shared.sale;
-      if (!s) return c.skip("P1-04", "\u062A\u0639\u062F\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u0629", "\u0645\u0641\u064A\u0634 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629");
-      const r = await salesStore._attempt("upsert", Object.assign({}, s, { total: 8 }));
-      const g = await c.getDoc("sales_col", s.id);
-      c.check("P1-04", "\u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u063A\u064A\u064A\u0631 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A", { result: "drop", total: 7 }, { result: r, total: g.data ? g.data.total : null });
-    }
-  },
-  {
-    id: "P1-05",
-    title: "\u062D\u0630\u0641 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0631\u0641\u0648\u0636 \u0644\u0623\u064A \u062D\u062F \u062D\u062A\u0649 \u0627\u0644\u0623\u062F\u0645\u0646 (H3)",
-    run: async (c) => {
-      const s = c.shared.sale;
-      if (!s) return c.skip("P1-05", "\u062D\u0630\u0641 \u0641\u0627\u062A\u0648\u0631\u0629", "\u0645\u0641\u064A\u0634 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062D\u0641\u0648\u0638\u0629");
-      const r = await salesStore._attempt("remove", s.id);
-      const g = await c.getDoc("sales_col", s.id);
-      c.check("P1-05", "\u0645\u062D\u0627\u0648\u0644\u0629 \u0627\u0644\u0645\u0633\u062D", { result: "drop", stillThere: true }, { result: r, stillThere: g.status === 200 });
-    }
-  },
-  {
-    id: "P1-06",
-    title: "\u0634\u0643\u0644 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629: \u0627\u0644\u0645\u0648\u0638\u0641 \u0628\u064A\u062A\u0631\u0641\u0636 \u0644\u0647 \u0627\u0644\u063A\u0644\u0637\u060C \u0648\u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0639\u062F\u0651\u064A (\u0627\u0644\u0642\u0627\u0639\u062F\u0629 isAdmin() ||)",
-    run: async (c) => {
-      const isAdmin = c.role === "admin";
-      const cases = [
-        ["\u0627\u0633\u062A\u0644\u0627\u0645 \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639", "bad_unpaid", { paid: false }, false],
-        ["\u0625\u062C\u0645\u0627\u0644\u064A \u0628\u0627\u0644\u0633\u0627\u0644\u0628", "bad_neg", { total: -5 }, false],
-        ["\u062A\u0648\u0635\u064A\u0644 \u0645\u062F\u0641\u0648\u0639 \u0645\u0646 \u0627\u0644\u0628\u062F\u0627\u064A\u0629", "bad_deliv_paid", { fulfillment: "delivery", paid: true, deliveryStatus: "prepared" }, false],
-        ["\u062A\u0648\u0635\u064A\u0644 \u062D\u0627\u0644\u062A\u0647 \u0645\u0634 \xAB\u0627\u062A\u062C\u0647\u0632\xBB", "bad_deliv_sent", { fulfillment: "delivery", paid: false, deliveryStatus: "sent" }, false],
-        ["\u0627\u0644\u0623\u0635\u0646\u0627\u0641 \u0645\u0634 \u0642\u0627\u064A\u0645\u0629", "bad_items", { items: "x" }, true],
-        ["id \u062C\u0648\u0647 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u062E\u062A\u0644\u0641 \u0639\u0646 \u0627\u0633\u0645 \u0627\u0644\u0645\u0633\u062A\u0646\u062F", "bad_id", {}, true]
-      ];
-      const actual = [];
-      const expected = [];
-      for (const [label, tag, extra, malformed] of cases) {
-        if (isAdmin && malformed) {
-          c.note(`\u0627\u0644\u0623\u062F\u0645\u0646: \u0627\u062A\u062E\u0637\u064A\u062A \xAB${label}\xBB (\u0643\u0627\u0646 \u0647\u064A\u0633\u064A\u0628 \u0633\u062C\u0644 \u0645\u0634\u0648\u0651\u0647 \u062F\u0627\u064A\u0645)`);
-          continue;
-        }
-        let doc = c.sale(tag, extra);
-        let pathId = doc.id;
-        if (tag === "bad_id") doc = Object.assign({}, doc, { id: `${doc.id}_other` });
-        const r = await c.putDoc("sales_col", pathId, doc);
-        actual.push([label, r.ok]);
-        expected.push([label, isAdmin]);
-        if (r.ok) c.leftover(`sales_col/${pathId}`, `\u0633\u062C\u0644 \u062A\u062C\u0631\u064A\u0628\u064A \u063A\u0644\u0637 \u0627\u0644\u0634\u0643\u0644 (${label}) \u2014 \u0627\u062A\u0642\u0628\u0644 \u0644\u0623\u0646 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u062A\u062E\u0637\u0649 \u0641\u062D\u0635 \u0627\u0644\u0634\u0643\u0644`);
-        if (!isAdmin) {
-          const g = await c.getDoc("sales_col", pathId);
-          actual[actual.length - 1].push(g.status);
-          expected[expected.length - 1].push(404);
-        }
-      }
-      c.check("P1-06", isAdmin ? "\u0627\u0644\u0623\u062F\u0645\u0646: \u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0627\u062A\u0642\u0628\u0644\u062A (\u0645\u062A\u0648\u0642\u0639 \u0645\u0646 \u0627\u0644\u0642\u0648\u0627\u0639\u062F)" : "\u0627\u0644\u0645\u0648\u0638\u0641: \u0643\u0644 \u0627\u0644\u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u063A\u0644\u0637 \u0627\u062A\u0631\u0641\u0636\u062A \u0648\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F \u0627\u062A\u0639\u0645\u0644", expected, actual);
-    }
-  },
-  {
-    id: "P1-07",
-    title: "\u0627\u0644\u0631\u0641\u0636 \u0627\u0644\u062F\u0627\u064A\u0645 \u0645\u0634 \u0628\u064A\u062A\u062D\u0637 \u0641\u064A \u0627\u0644\u0637\u0627\u0628\u0648\u0631 (F3)",
-    run: async (c) => {
-      if (c.role === "admin") return c.skip("P1-07", "\u062A\u0635\u0646\u064A\u0641 \u0627\u0644\u0631\u0641\u0636", "\u0627\u0644\u0623\u062F\u0645\u0646 \u0645\u0634 \u0628\u064A\u062A\u0631\u0641\u0636 \u0644\u0647 \u0634\u0643\u0644 \u0641\u0627\u062A\u0648\u0631\u0629\u060C \u0641\u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 \u0628\u0633");
-      const before = getOfflineQueue().length;
-      const r = await salesStore._attempt("upsert", c.sale("bad_class", { paid: false }));
-      const after = getOfflineQueue().length;
-      c.check("P1-07", "\u0631\u0641\u0636 \u0645\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 = \xABdrop\xBB \u0648\u0627\u0644\u0637\u0627\u0628\u0648\u0631 \u0632\u064A \u0645\u0627 \u0647\u0648", { result: "drop", queueGrew: false }, { result: r, queueGrew: after > before });
-    }
-  },
-  {
-    id: "P1-08",
-    title: "\u0627\u0644\u062A\u062C\u0645\u064A\u0639 \u0627\u0644\u0634\u0647\u0631\u064A: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0628\u062A\u062A\u062D\u0633\u0628 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 (E9)",
-    run: async (c) => {
-      const monthId = businessDayOf(Date.now()).slice(0, 7);
-      const testDay = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}`;
-      const invId = `${SYSTEM_TEST_PREFIX}${c.runId}_agg`;
-      const first = await attemptInvoiceAggregateWrite(testDay, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", invId, 7);
-      const second = await attemptInvoiceAggregateWrite(testDay, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", invId, 7);
-      c.leftover(`invoice_aggregate_writes_col/${invId}`, "\u0639\u0644\u0627\u0645\u0629 \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
-      c.check("P1-08a", "\u0627\u0644\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0623\u0648\u0644 \u062B\u0645 \u0625\u0639\u0627\u062F\u0629 \u0646\u0641\u0633 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", { first: "ok", second: "drop" }, { first, second });
-      if (c.role === "admin") {
-        const g = await c.getDoc("monthly_aggregates_col", monthId);
-        const days = g.data && g.data.days || {};
-        const node = days[testDay] && days[testDay]["\u0627\u062E\u062A\u0628\u0627\u0631"] && days[testDay]["\u0627\u062E\u062A\u0628\u0627\u0631"].sales;
-        c.check("P1-08b", "\u0627\u0644\u0642\u064A\u0645\u0629 \u0641\u064A \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631 = \u0627\u0644\u0645\u0628\u0644\u063A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629", 7, node ? node[invId] : null, `HTTP ${g.status}`);
-      } else {
-        c.skip("P1-08b", "\u0642\u0631\u0627\u0621\u0629 \u0642\u064A\u0645\u0629 \u0627\u0644\u0634\u0647\u0631", "\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0645\u0634 \u0645\u0633\u0645\u0648\u062D \u0644\u0647 \u064A\u0642\u0631\u0627 \u0627\u0644\u062A\u062C\u0645\u064A\u0639\u0627\u062A (\u0645\u062A\u0648\u0642\u0639) \u2014 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0641\u062D\u0635\u0647\u0627");
-      }
-      if (first === "ok") {
-        const mdName = `${FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "")}/monthly_aggregates_col/${monthId}`;
-        const t = await c.http("POST", `${FIRESTORE_BASE}:commit`, {
-          writes: [{ update: { name: mdName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
-        });
-        c.note(`${t.ok ? "\u{1F9F9} \u0627\u062A\u0645\u0633\u062D \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0645\u0646 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631" : "\u26A0\uFE0F \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0644\u0633\u0647 \u0641\u064A monthly_aggregates_col/" + monthId + " \u2190 days \u2190 " + testDay}`);
-        if (!t.ok) c.leftover(`monthly_aggregates_col/${monthId} (days.${testDay})`, "\u0627\u0645\u0633\u062D\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console");
-      }
-    }
-  },
-  {
-    id: "P1-09",
-    title: "\u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631: \u0631\u0642\u0645\u064A\u0646 \u0641\u064A \u0646\u0641\u0633 \u0627\u0644\u0644\u062D\u0638\u0629 \u0645\u0627\u064A\u062A\u0643\u0631\u0631\u0634 (D1/D2)",
-    run: async (c) => {
-      const fb = Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS);
-      const [x, y] = await Promise.all([claimNextInvoiceNumber(fb), claimNextInvoiceNumber(fb)]);
-      const after = await c.getDoc("settings_col", "invoice_number_settings");
-      c.check("P1-09a", "\u0631\u0642\u0645\u064A\u0646 \u0627\u062A\u062D\u062C\u0632\u0648\u0627 \u0645\u0639 \u0628\u0639\u0636", true, x.number !== y.number, `\u0627\u0644\u0623\u0631\u0642\u0627\u0645: ${x.number} \u0648 ${y.number}`);
-      c.check("P1-09b", "\u0627\u0644\u0639\u062F\u0627\u062F \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 = \u0623\u0643\u0628\u0631 \u0631\u0642\u0645 + 1", Math.max(x.number, y.number) + 1, after.data ? after.data.nextNumber : null, `HTTP ${after.status}`);
-      c.leftover("settings_col/invoice_number_settings", "\u0627\u0644\u0639\u062F\u0627\u062F \u0632\u0627\u062F \u0628\u0645\u0642\u062F\u0627\u0631 2 (\u0631\u0642\u0645\u064A\u0646 \u0627\u062A\u062D\u0631\u0642\u0648\u0627)");
-    }
-  }
-];
-async function sysCleanupAggDay(c, monthId, testDay) {
-  const mdName = `${FIRESTORE_BASE.replace("https://firestore.googleapis.com/v1/", "")}/monthly_aggregates_col/${monthId}`;
-  const t = await c.http("POST", `${FIRESTORE_BASE}:commit`, {
-    writes: [{ update: { name: mdName, fields: {} }, updateMask: { fieldPaths: [firestoreFieldPath(["days", testDay])] } }]
-  });
-  c.note(t.ok ? "\u{1F9F9} \u0627\u062A\u0645\u0633\u062D \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0645\u0646 \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631" : `\u26A0\uFE0F \u062D\u0642\u0644 \u0627\u0644\u0641\u062D\u0635 \u0644\u0633\u0647 \u0641\u064A \u0645\u0633\u062A\u0646\u062F \u0627\u0644\u0634\u0647\u0631 \u2190 days \u2190 ${testDay}`);
-  if (!t.ok) c.leftover(`monthly_aggregates_col/${monthId} (days.${testDay})`, "\u0627\u0645\u0633\u062D\u0647 \u064A\u062F\u0648\u064A \u0645\u0646 Console");
-}
-const SYS_PART2_CHECKS = [
-  {
-    id: "P2-01",
-    title: "\u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\xAB\u0641\u0648\u0627\u062A\u064A\u0631\u064A\xBB: \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0628\u0627\u0644\u0645\u062F\u0649 \u0627\u0644\u0632\u0645\u0646\u064A \u0628\u064A\u0631\u062C\u0651\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 (E10)",
-    run: async (c) => {
-      if (c.unapproved) return c.skip("P2-01", "\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0628\u0627\u0644\u062A\u0627\u0631\u064A\u062E", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
-      const s = c.sale("q1");
-      const saved = await salesStore._attempt("upsert", s);
-      c.leftover(`sales_col/${s.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
-      const rows = await fetchSalesInRange(SYS_OLD_TS - 1e3, SYS_OLD_TS + 1e3);
-      const mine = Array.isArray(rows) ? rows.find((r) => r.id === s.id) : null;
-      c.check("P2-01", "\u062D\u0641\u0638 \u062B\u0645 \u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0628\u0627\u0644\u0645\u062F\u0649 (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0641\u0648\u0627\u062A\u064A\u0631\u064A)", { saved: "ok", found: true, total: 7 }, { saved, found: !!mine, total: mine ? mine.total : null }, rows === null ? "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644 (null) \u2014 \u0645\u0645\u0643\u0646 \u064A\u062D\u062A\u0627\u062C index" : `\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0631\u062C\u0651\u0639 ${rows.length} \u0641\u0627\u062A\u0648\u0631\u0629 \u0641\u064A \u0627\u0644\u0645\u062F\u0649`);
-      if (mine && c.role === "employee") c.note("\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0642\u0631\u0627 \u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0639\u0646 \u0637\u0631\u064A\u0642 \u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 \u064A\u0642\u0631\u0627 \u0643\u0644 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u2014 \u0634\u0648\u0641 \u0627\u0644\u0645\u0644\u0627\u062D\u0638\u0627\u062A)");
-    }
-  },
-  {
-    id: "P2-02",
-    title: "\u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0645\u0634 \u0628\u062A\u0638\u0647\u0631 \u0641\u064A \u0623\u064A \u062A\u0642\u0631\u064A\u0631 \u062D\u0642\u064A\u0642\u064A (\u062D\u0645\u0627\u064A\u0629 \u0645\u0646 \u0627\u0644\u062A\u0644\u0648\u062B)",
-    run: async (c) => {
-      if (c.unapproved) return c.skip("P2-02", "\u062D\u0645\u0627\u064A\u0629 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
-      const rows = await fetchSalesInRange(Date.now() - 35 * 24 * 60 * 60 * 1e3, Date.now());
-      const leaked = Array.isArray(rows) ? rows.filter((r) => String(r.id || "").startsWith(SYSTEM_TEST_PREFIX)).length : null;
-      c.check("P2-02", "\u0639\u062F\u062F \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631 \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u064A \u0622\u062E\u0631 35 \u064A\u0648\u0645", 0, leaked, Array.isArray(rows) ? `\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0631\u062C\u0651\u0639 ${rows.length} \u0641\u0627\u062A\u0648\u0631\u0629 \u062D\u0642\u064A\u0642\u064A\u0629 \u0641\u064A \u0627\u0644\u0645\u062F\u0649` : "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644");
-    }
-  },
-  {
-    id: "P2-03",
-    title: "\u062D\u062F \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0627\u0644\u0633\u0627\u0639\u0629 3 \u0627\u0644\u0641\u062C\u0631 (E15)",
-    run: async (c) => {
-      const L = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0, 0).getTime();
-      const cases = [
-        ["2:59 \u2192 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647", L(2026, 10, 18, 2, 59), "2026-10-17"],
-        ["3:00 \u2192 \u0646\u0641\u0633 \u0627\u0644\u064A\u0648\u0645", L(2026, 10, 18, 3, 0), "2026-10-18"],
-        ["12:00 \u0645\u0646\u062A\u0635\u0641 \u0627\u0644\u0644\u064A\u0644 \u2192 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647", L(2026, 10, 18, 0, 0), "2026-10-17"],
-        ["23:59 \u2192 \u0646\u0641\u0633 \u0627\u0644\u064A\u0648\u0645", L(2026, 10, 18, 23, 59), "2026-10-18"],
-        ["\u0623\u0648\u0644 \u0627\u0644\u0634\u0647\u0631 2:59", L(2026, 11, 1, 2, 59), "2026-10-31"],
-        ["\u0623\u0648\u0644 \u0627\u0644\u0633\u0646\u0629 2:59", L(2027, 1, 1, 2, 59), "2026-12-31"],
-        ["\u0623\u0648\u0644 \u0645\u0627\u0631\u0633 2:59 (\u0633\u0646\u0629 \u0643\u0628\u064A\u0633\u0629)", L(2028, 3, 1, 2, 59), "2028-02-29"],
-        ["\u0623\u0648\u0644 \u0645\u0627\u0631\u0633 2:59 (\u0633\u0646\u0629 \u0639\u0627\u062F\u064A\u0629)", L(2027, 3, 1, 2, 59), "2027-02-28"]
-      ];
-      c.note(`\u0641\u0631\u0642 \u0627\u0644\u062A\u0648\u0642\u064A\u062A \u0639\u0644\u0649 \u0627\u0644\u062C\u0647\u0627\u0632: ${-(/* @__PURE__ */ new Date()).getTimezoneOffset() / 60} \u0633\u0627\u0639\u0629 \u0639\u0646 \u062C\u0631\u064A\u0646\u062A\u0634 (\u0627\u0644\u062D\u0633\u0627\u0628 \u0628\u064A\u0639\u062A\u0645\u062F \u0639\u0644\u0649 \u0633\u0627\u0639\u0629 \u0648\u062A\u0648\u0642\u064A\u062A \u0627\u0644\u062C\u0647\u0627\u0632)`);
-      c.check("P2-03", "\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0644\u0643\u0644 \u062A\u0648\u0642\u064A\u062A", cases.map((x) => [x[0], x[2]]), cases.map((x) => [x[0], businessDayOf(x[1])]));
-    }
-  },
-  {
-    id: "P2-04",
-    title: "\u0645\u062F\u0649 \xAB\u0627\u0644\u0646\u0647\u0627\u0631\u062F\u0647\xBB \u0645\u062A\u0648\u0627\u0641\u0642 \u0645\u0639 \u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A (E15)",
-    run: async (c) => {
-      const r = businessDayRange(0);
-      const checks = {
-        startEndSameDay: businessDayOf(r.start) === businessDayOf(r.end),
-        justBeforeIsPreviousDay: businessDayOf(r.start - 1) !== businessDayOf(r.start),
-        justAfterIsNextDay: businessDayOf(r.end + 1) !== businessDayOf(r.end),
-        startIs3am: new Date(r.start).getHours() === 3
-      };
-      c.check("P2-04", "\u0628\u062F\u0627\u064A\u0629 \u0648\u0646\u0647\u0627\u064A\u0629 \u0645\u062F\u0649 \u0627\u0644\u064A\u0648\u0645", { startEndSameDay: true, justBeforeIsPreviousDay: true, justAfterIsNextDay: true, startIs3am: true }, checks);
-    }
-  },
-  {
-    id: "P2-05",
-    title: "\u062A\u0635\u0641\u064A\u0631 \u062A\u0631\u0642\u064A\u0645 \u0627\u0644\u0641\u0648\u0627\u062A\u064A\u0631: \u0623\u0628\u062F\u064B\u0627 / \u064A\u0648\u0645\u064A\u064B\u0627 / \u0634\u0647\u0631\u064A\u064B\u0627 (D3)",
-    run: async (c) => {
-      const today = currentResetKey("daily");
-      const month = currentResetKey("monthly");
-      const take = (freq, last) => {
-        const r = takeNextInvoiceNumber({ nextNumber: 5, resetFrequency: freq, lastResetKey: last });
-        return [r.number, r.updatedSettings.nextNumber, r.updatedSettings.lastResetKey];
-      };
-      c.note(`\u0645\u0641\u062A\u0627\u062D \u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u064A\u0648\u0645\u064A \u0628\u064A\u062A\u062D\u0633\u0628 \u0628\u0633\u0627\u0639\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 (\u0628\u064A\u062A\u0635\u0641\u0651\u0631 6 \u0627\u0644\u0635\u0628\u062D): ${today} \u2014 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u062F\u0644\u0648\u0642\u062A\u064A: ${businessDayOf(Date.now())}`);
-      c.check(
-        "P2-05",
-        "\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0628\u0639\u062F \u0643\u0644 \u0646\u0648\u0639 \u062A\u0635\u0641\u064A\u0631",
-        { never_old: [5, 6, null], daily_same: [5, 6, today], daily_old: [1, 2, today], monthly_same: [5, 6, month], monthly_old: [1, 2, month] },
-        { never_old: take("never", "2000-01-01"), daily_same: take("daily", today), daily_old: take("daily", "2000-01-01"), monthly_same: take("monthly", month), monthly_old: take("monthly", "2000-01") }
-      );
-    }
-  },
-  {
-    id: "P2-06",
-    title: "\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0641\u0631\u0639 \u0628\u062A\u062A\u062C\u0645\u0651\u0639 \u062A\u062D\u062A \xAB\u0628\u062F\u0648\u0646 \u0641\u0631\u0639\xBB (E16)",
-    run: async (c) => {
-      if (c.unapproved) return c.skip("P2-06", "\u062A\u062C\u0645\u064A\u0639 \u0628\u062F\u0648\u0646 \u0641\u0631\u0639", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
-      const monthId = businessDayOf(Date.now()).slice(0, 7);
-      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_nb`;
-      const ida = `${SYSTEM_TEST_PREFIX}${c.runId}_nb1`;
-      const idb = `${SYSTEM_TEST_PREFIX}${c.runId}_nb2`;
-      const ra = await attemptInvoiceAggregateWrite(day, "", "sales", ida, 7);
-      const rb = await attemptInvoiceAggregateWrite(day, null, "sales", idb, 7);
-      c.leftover(`invoice_aggregate_writes_col/${ida} \u0648 ${idb}`, "\u0639\u0644\u0627\u0645\u0627\u062A \u062D\u0645\u0627\u064A\u0629 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647\u0627)");
-      c.check("P2-06a", "\u062A\u0633\u062C\u064A\u0644 \u0641\u0627\u062A\u0648\u0631\u062A\u064A\u0646: \u0641\u0631\u0639 \u0641\u0627\u0636\u064A \u0648\u0641\u0631\u0639 null", ["ok", "ok"], [ra, rb]);
-      if (c.role === "admin") {
-        const g = await c.getDoc("monthly_aggregates_col", monthId);
-        const dayNode = g.data && g.data.days && g.data.days[day] || {};
-        const node = dayNode["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"] && dayNode["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"].sales;
-        c.check("P2-06b", "\u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0644\u064A \u0627\u062A\u0633\u062C\u0644 \u062A\u062D\u062A\u0647 \u0648\u0627\u0644\u0645\u0628\u0627\u0644\u063A", { branches: ["\u0628\u062F\u0648\u0646 \u0641\u0631\u0639"], a: 7, b: 7 }, { branches: Object.keys(dayNode), a: node ? node[ida] : null, b: node ? node[idb] : null }, `HTTP ${g.status}`);
-      } else {
-        c.skip("P2-06b", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0641\u0631\u0639 \u0627\u0644\u0645\u0633\u062C\u0651\u0644", "\u0627\u0644\u0645\u0648\u0638\u0641 \u0627\u0644\u0639\u0627\u062F\u064A \u0645\u0634 \u0645\u0633\u0645\u0648\u062D \u0644\u0647 \u064A\u0642\u0631\u0627 \u0627\u0644\u062A\u062C\u0645\u064A\u0639\u0627\u062A \u2014 \u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u0641\u062D\u0635\u0647\u0627");
-      }
-      if (ra === "ok" || rb === "ok") await sysCleanupAggDay(c, monthId, day);
-    }
-  },
-  {
-    id: "P2-07",
-    title: "\u0625\u0639\u062F\u0627\u062F\u0627\u062A \u0627\u0644\u0634\u0631\u0627\u064A\u062D \u0648\u0627\u0644\u0641\u0631\u0648\u0639 \u0645\u0642\u0631\u0648\u0621\u0629 \u0644\u0644\u0643\u0627\u0634\u064A\u0631 (\u0645\u0634 \u0645\u0645\u0646\u0648\u0639\u0629)",
-    run: async (c) => {
-      if (c.unapproved) return c.skip("P2-07", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0625\u0639\u062F\u0627\u062F\u0627\u062A", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
-      const t = await c.getDoc("settings_col", "tier_settings");
-      const b = await c.getDoc("settings_col", "branch_settings");
-      c.check("P2-07", "\u0627\u0644\u062D\u0627\u0644\u0629 \u0645\u0634 403 (200 \u0623\u0648 404 \u0644\u0648 \u0644\u0633\u0647 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634)", { tier: true, branch: true }, { tier: t.status === 200 || t.status === 404, branch: b.status === 200 || b.status === 404 }, `tier ${t.status} | branch ${b.status}`);
-    }
-  },
-  {
-    id: "P2-08",
-    title: "\u062D\u0633\u0627\u0628 \u0645\u0639\u0644\u0651\u0642 \u0623\u0648 \u0645\u0631\u0641\u0648\u0636: \u0645\u0645\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0628\u064A\u0639 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629 \u0648\u0627\u0644\u0639\u062F\u0627\u062F \u0648\u0627\u0644\u062A\u062C\u0645\u064A\u0639 (H4)",
-    run: async (c) => {
-      if (!c.unapproved) return c.skip("P2-08", "\u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647", "\u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0628\u064A\u062A\u0634\u063A\u0651\u0644 \u0628\u062D\u0633\u0627\u0628 \u0645\u0639\u0644\u0651\u0642 \u0623\u0648 \u0645\u0631\u0641\u0648\u0636 \u0628\u0633 (\u0633\u062C\u0651\u0644 \u062D\u0633\u0627\u0628 \u062C\u062F\u064A\u062F \u0628\u0625\u064A\u0645\u064A\u0644 \u062A\u0627\u0646\u064A \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u062A\u0639\u062A\u0645\u062F\u0647)");
-      const monthId = businessDayOf(Date.now()).slice(0, 7);
-      const s = c.sale("h4");
-      const saved = await salesStore._attempt("upsert", s);
-      const rows = await fetchSalesInRange(SYS_OLD_TS - 1e3, SYS_OLD_TS + 1e3);
-      const settings = await c.getDoc("settings_col", "invoice_number_settings");
-      const day = `${monthId}-${SYSTEM_TEST_PREFIX}${c.runId}_h4`;
-      const agg = await attemptInvoiceAggregateWrite(day, "\u0627\u062E\u062A\u0628\u0627\u0631", "sales", `${SYSTEM_TEST_PREFIX}${c.runId}_h4agg`, 7);
-      if (saved === "ok") c.leftover(`sales_col/${s.id}`, "\u0627\u062A\u0642\u0628\u0644\u062A \u0645\u0646 \u062D\u0633\u0627\u0628 \u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647 \u2014 \u062F\u0647 \u062E\u0644\u0644");
-      c.check("P2-08", "\u0643\u0644 \u0627\u0644\u0639\u0645\u0644\u064A\u0627\u062A \u0627\u062A\u0631\u0641\u0636\u062A", { sale: "drop", read: null, settings: 403, aggregate: "drop" }, { sale: saved, read: rows, settings: settings.status, aggregate: agg });
-    }
-  }
-];
-function sysDeliveryDoc(c, tag, extra) {
-  return c.sale(
-    tag,
-    Object.assign(
-      {
-        fulfillment: "delivery",
-        paid: false,
-        deliveryStatus: "prepared",
-        deliveryArea: "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631",
-        customerPhone: "01000000000",
-        dispatchLocation: null,
-        repName: null,
-        paymentMethod: null,
-        preparedAt: SYS_OLD_TS
-      },
-      extra || {}
-    )
-  );
-}
-async function sysMakeOrder(c, tag, extra) {
-  const doc = sysDeliveryDoc(c, tag, extra);
-  const result = await salesStore._attempt("upsert", doc);
-  c.leftover(`sales_col/${doc.id}`, "\u0623\u0648\u0631\u062F\u0631 \u062A\u0648\u0635\u064A\u0644 \u062A\u062C\u0631\u064A\u0628\u064A (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0645\u0627 \u0628\u062A\u0633\u0645\u062D\u0634 \u0628\u0645\u0633\u062D\u0647)");
-  return { doc, result };
-}
-const sysSendPatch = (extra) => Object.assign({ repName: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631", dispatchLocation: "\u0627\u062E\u062A\u0628\u0627\u0631", sentBy: `${SYSTEM_TEST_PREFIX}sender`, sentAt: SYS_OLD_TS, deliveryStatus: "sent", paid: false, paymentMethod: null, splitTransferMethod: null, cashAmount: null, transferAmount: null, receivedBy: null, receivedAt: null }, extra || {});
-const sysDonePatch = (extra) => Object.assign({ deliveryStatus: "done", paid: true, paymentMethod: "cash", splitTransferMethod: null, cashAmount: null, transferAmount: null, receivedBy: `${SYSTEM_TEST_PREFIX}receiver`, receivedAt: SYS_OLD_TS }, extra || {});
-const sysAdvance = (doc, patch) => Object.assign({}, doc, patch);
-const SYS_PART3_CHECKS = [
-  {
-    id: "P3-01",
-    title: "\u0623\u0648\u0631\u062F\u0631 \u062C\u062F\u064A\u062F \u0632\u064A \u0645\u0627 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0628\u064A\u0639\u0645\u0644\u0647: \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u0648\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u062F\u0648\u0646 \u0645\u0643\u0627\u0646 \u062E\u0631\u0648\u062C (G1/G3)",
-    run: async (c) => {
-      const { doc, result } = await sysMakeOrder(c, "oa");
-      if (result === "ok") c.shared.oa = doc;
-      const g = await c.getDoc("sales_col", doc.id);
-      const d = g.data || {};
-      const back = {
-        fulfillment: d.fulfillment === "delivery",
-        status: d.deliveryStatus === "prepared",
-        unpaid: d.paid === false,
-        area: d.deliveryArea === "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631",
-        phone: d.customerPhone === "01000000000",
-        noDispatch: d.dispatchLocation === null || d.dispatchLocation === void 0,
-        noRep: d.repName === null || d.repName === void 0,
-        noPayment: d.paymentMethod === null || d.paymentMethod === void 0,
-        total: d.total === 7
-      };
-      const allTrue = Object.fromEntries(Object.keys(back).map((k) => [k, true]));
-      c.check("P3-01", "\u0627\u0644\u062D\u0641\u0638 \u062B\u0645 \u0627\u0644\u0642\u0631\u0627\u0621\u0629", { saved: "ok", back: allTrue }, { saved: result, back }, `HTTP ${g.status}`);
-    }
-  },
-  {
-    id: "P3-02",
-    title: "\u0623\u0634\u0643\u0627\u0644 \u0623\u0648\u0631\u062F\u0631 \u063A\u0644\u0637 \u0628\u062A\u062A\u0631\u0641\u0636 \u0644\u0644\u0645\u0648\u0638\u0641: \u0645\u0646 \u063A\u064A\u0631 \u062D\u0627\u0644\u0629\u060C \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0646 \u0627\u0644\u0623\u0648\u0644\u060C \u0646\u0648\u0639 \u0627\u0633\u062A\u0644\u0627\u0645 \u0645\u0634 \u0645\u0639\u0631\u0648\u0641",
-    run: async (c) => {
-      if (c.role === "admin") return c.skip("P3-02", "\u0631\u0641\u0636 \u0623\u0634\u0643\u0627\u0644 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "\u0627\u0644\u0623\u062F\u0645\u0646 \u0628\u064A\u062A\u062E\u0637\u0649 \u0641\u062D\u0635 \u0627\u0644\u0634\u0643\u0644 (\u0627\u062A\u0623\u0643\u062F\u0646\u0627 \u0641\u064A P1-06) \u2014 \u0627\u0644\u0641\u062D\u0635 \u062F\u0647 \u0644\u0644\u0645\u0648\u0638\u0641 \u0628\u0633");
-      const noStatus = sysDeliveryDoc(c, "bad_nostatus");
-      delete noStatus.deliveryStatus;
-      const cases = [
-        ["\u0645\u0646 \u063A\u064A\u0631 deliveryStatus", noStatus],
-        ["\u062D\u0627\u0644\u0629 done \u0645\u0646 \u0627\u0644\u0623\u0648\u0644", sysDeliveryDoc(c, "bad_done", { deliveryStatus: "done" })],
-        ["\u0646\u0648\u0639 \u0627\u0633\u062A\u0644\u0627\u0645 \u0645\u062C\u0647\u0648\u0644", sysDeliveryDoc(c, "bad_kind", { fulfillment: "courier" })]
-      ];
-      const actual = [];
-      const expected = [];
-      for (const [label, doc] of cases) {
-        const r = await c.putDoc("sales_col", doc.id, doc);
-        const g = await c.getDoc("sales_col", doc.id);
-        actual.push([label, r.ok, g.status]);
-        expected.push([label, false, 404]);
-        if (r.ok) c.leftover(`sales_col/${doc.id}`, `\u0627\u062A\u0642\u0628\u0644 \u0634\u0643\u0644 \u063A\u0644\u0637 (${label}) \u2014 \u062E\u0644\u0644 \u0641\u064A \u0627\u0644\u0642\u0648\u0627\u0639\u062F`);
-      }
-      c.check("P3-02", "\u0643\u0644\u0647\u0645 \u0627\u062A\u0631\u0641\u0636\u0648\u0627 \u0648\u0645\u0641\u064A\u0634 \u0645\u0633\u062A\u0646\u062F \u0627\u062A\u0639\u0645\u0644", expected, actual);
-    }
-  },
-  {
-    id: "P3-03",
-    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u0641\u062A\u0648\u062D \u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A (\u0646\u0641\u0633 \u062F\u0627\u0644\u0629 \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A) (G5)",
-    run: async (c) => {
-      const a = c.shared.oa;
-      if (!a) return c.skip("P3-03", "\u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634 \u0641\u064A \u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0644\u064A \u0642\u0628\u0644\u0647");
-      const rows = await fetchOpenDeliveryOrders();
-      if (rows === null) return c.check("P3-03", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "rows", null, "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644 (\u0645\u0645\u0643\u0646 \u0641\u0647\u0631\u0633 \u0646\u0627\u0642\u0635 \u0623\u0648 \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644)");
-      const mine = rows.find((r) => r.id === a.id);
-      c.check("P3-03", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0644\u064A \u0644\u0633\u0647 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0638\u0627\u0647\u0631", { listed: true, status: "prepared" }, { listed: !!mine, status: mine ? mine.deliveryStatus : null }, `${rows.length} \u0623\u0648\u0631\u062F\u0631 \u0645\u0641\u062A\u0648\u062D \u0641\u064A \u0627\u0644\u0642\u0627\u064A\u0645\u0629`);
-    }
-  },
-  {
-    id: "P3-04",
-    title: "\u0627\u0644\u0623\u0635\u0646\u0627\u0641 \u0648\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0648\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0648\u0627\u0644\u0623\u0633\u0645\u0627\u0621 \u0645\u0627 \u062A\u062A\u063A\u064A\u0631\u0634 \u0628\u0639\u062F \u0627\u0644\u062D\u0641\u0638\u060C \u062D\u062A\u0649 \u0644\u0644\u0623\u062F\u0645\u0646 (G1)",
-    run: async (c) => {
-      const a = c.shared.oa;
-      if (!a) return c.skip("P3-04", "\u062D\u0642\u0648\u0644 \u062B\u0627\u0628\u062A\u0629", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634");
-      const attempts = [
-        ["\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A", { total: 8 }],
-        ["\u0627\u0644\u0623\u0635\u0646\u0627\u0641", { items: [{ productName: `${SYSTEM_TEST_PREFIX}other`, unitPrice: 1, qty: 1, lineTotal: 1 }] }],
-        ["\u0627\u0644\u0645\u0646\u0637\u0642\u0629", { deliveryArea: "\u0645\u0646\u0637\u0642\u0629 \u062A\u0627\u0646\u064A\u0629" }],
-        ["\u062A\u0644\u064A\u0641\u0648\u0646 \u0627\u0644\u0632\u0628\u0648\u0646", { customerPhone: "01111111111" }],
-        ["\u0627\u0633\u0645 \u0627\u0644\u0645\u0648\u0638\u0641", { employeeName: `${SYSTEM_TEST_PREFIX}someone_else` }],
-        ["\u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629", { invoiceNumber: 5 }],
-        ["\u0627\u0633\u0645 \u0627\u0644\u0632\u0628\u0648\u0646", { customerName: "\u0632\u0628\u0648\u0646 \u062A\u0627\u0646\u064A" }],
-        ["\u0648\u0642\u062A \u0627\u0644\u0625\u0646\u0634\u0627\u0621", { createdAt: SYS_OLD_TS + 1e3 }],
-        ["\u0646\u0648\u0639 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0625\u0644\u0649 \u0627\u0633\u062A\u0644\u0627\u0645", { fulfillment: "pickup", paid: true }]
-      ];
-      const actual = [];
-      const expected = [];
-      for (const [label, patch] of attempts) {
-        const r = await c.putDoc("sales_col", a.id, sysAdvance(a, patch));
-        actual.push([label, r.ok]);
-        expected.push([label, false]);
-      }
-      const g = await c.getDoc("sales_col", a.id);
-      const d = g.data || {};
-      const same = d.total === 7 && d.deliveryArea === "\u0645\u0646\u0637\u0642\u0629 \u0627\u062E\u062A\u0628\u0627\u0631" && d.customerPhone === "01000000000" && d.fulfillment === "delivery" && d.deliveryStatus === "prepared" && Array.isArray(d.items) && d.items.length === 1;
-      c.check("P3-04", "\u0643\u0644 \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062A\u063A\u064A\u064A\u0631 \u0627\u062A\u0631\u0641\u0636\u062A \u0648\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0632\u064A \u0645\u0627 \u0647\u0648", { attempts: expected, unchanged: true }, { attempts: actual, unchanged: same });
-    }
-  },
-  {
-    id: "P3-05",
-    title: "\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u2190 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0628\u063A\u064A\u0631 \u062F\u0641\u0639: \u0627\u0644\u0645\u0646\u062F\u0648\u0628 \u0648\u0645\u0643\u0627\u0646 \u0627\u0644\u062E\u0631\u0648\u062C \u0628\u064A\u062A\u0633\u062C\u0644\u0648\u0627 (G1/G3)",
-    run: async (c) => {
-      const a = c.shared.oa;
-      if (!a) return c.skip("P3-05", "\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u0634");
-      const next = sysAdvance(a, sysSendPatch());
-      const r = await salesStore._attempt("upsert", next);
-      if (r === "ok") c.shared.oa = next;
-      const g = await c.getDoc("sales_col", a.id);
-      const d = g.data || {};
-      c.check("P3-05", "\u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u062A\u0633\u062C\u0644 \u0648\u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0632\u064A \u0645\u0627 \u0647\u0648", { result: "ok", status: "sent", unpaid: true, rep: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631", dispatch: "\u0627\u062E\u062A\u0628\u0627\u0631", total: 7 }, { result: r, status: d.deliveryStatus, unpaid: d.paid === false, rep: d.repName, dispatch: d.dispatchLocation, total: d.total });
-      if (c.role === "employee") c.note("\u0627\u0644\u0645\u0648\u0638\u0641 \u062D\u0631\u0651\u0643 \u0623\u0648\u0631\u062F\u0631 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A: \u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647. \u0627\u0644\u0634\u0627\u0634\u0629 \u0628\u0633 \u0647\u064A \u0627\u0644\u0644\u064A \u0628\u062A\u062E\u0628\u0651\u064A \u0632\u0631\u0627\u0631 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0639\u0646 \u063A\u064A\u0631 \u0635\u0627\u062D\u0628 \u0627\u0644\u0623\u0648\u0631\u062F\u0631.");
-    }
-  },
-  {
-    id: "P3-06",
-    title: "\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u062E\u0644\u0641 \u0645\u0631\u0641\u0648\u0636\u060C \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u064A\u0642\u0641\u0644 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 (G1)",
-    run: async (c) => {
-      const a = c.shared.oa;
-      if (!a || a.deliveryStatus !== "sent") return c.skip("P3-06", "\u0627\u0644\u0631\u062C\u0648\u0639 \u0644\u0644\u062E\u0644\u0641 \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u0627\u062A\u0628\u0639\u062A\xBB");
-      const back = await c.putDoc("sales_col", a.id, sysAdvance(a, { deliveryStatus: "prepared" }));
-      const done = sysAdvance(a, sysDonePatch());
-      const r = await salesStore._attempt("upsert", done);
-      if (r === "ok") c.shared.oa = done;
-      const g = await c.getDoc("sales_col", a.id);
-      const d = g.data || {};
-      c.check("P3-06", "\u0645\u0646 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0644\u0640\xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0645\u0631\u0641\u0648\u0636\u060C \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0628\u064A\u0639\u062F\u0651\u064A \u0648\u064A\u062A\u062E\u0632\u0646 \u0645\u062F\u0641\u0648\u0639", { backRefused: true, receive: "ok", status: "done", paid: true, method: "cash" }, { backRefused: back.ok === false, receive: r, status: d.deliveryStatus, paid: d.paid === true, method: d.paymentMethod });
-    }
-  },
-  {
-    id: "P3-07",
-    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0645\u062A\u062C\u0645\u0651\u062F: \u0644\u0627 \u0631\u062C\u0648\u0639 \u0648\u0644\u0627 \u062A\u063A\u064A\u064A\u0631\u060C \u0648\u0625\u0639\u0627\u062F\u0629 \u0625\u0631\u0633\u0627\u0644 \u0646\u0641\u0633 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u0645\u0633\u0645\u0648\u062D\u0629 (G1)",
-    run: async (c) => {
-      const a = c.shared.oa;
-      if (!a || a.deliveryStatus !== "done") return c.skip("P3-07", "\u062A\u062C\u0645\u064A\u062F \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB");
-      const attempts = [
-        ["\u0631\u062C\u0648\u0639 \u0644\u0640\xAB\u0627\u062A\u0628\u0639\u062A\xBB", { deliveryStatus: "sent" }],
-        ["\u0631\u062C\u0648\u0639 \u0644\u0640\xAB\u0627\u062A\u062C\u0647\u0632\xBB", { deliveryStatus: "prepared" }],
-        ["\u0631\u062C\u0648\u0639 \u0644\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639", { paid: false }],
-        ["\u062A\u063A\u064A\u064A\u0631 \u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u062F\u0641\u0639", { paymentMethod: "instapay" }],
-        ["\u062A\u063A\u064A\u064A\u0631 \u0627\u0633\u0645 \u0627\u0644\u0645\u0646\u062F\u0648\u0628", { repName: "\u0645\u0646\u062F\u0648\u0628 \u062A\u0627\u0646\u064A" }],
-        ["\u062A\u063A\u064A\u064A\u0631 \u0648\u0642\u062A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645", { receivedAt: SYS_OLD_TS + 5e3 }]
-      ];
-      const actual = [];
-      const expected = [];
-      for (const [label, patch] of attempts) {
-        const r = await c.putDoc("sales_col", a.id, sysAdvance(a, patch));
-        actual.push([label, r.ok]);
-        expected.push([label, false]);
-      }
-      const same = await c.putDoc("sales_col", a.id, a);
-      const g = await c.getDoc("sales_col", a.id);
-      const d = g.data || {};
-      c.check("P3-07", "\u0643\u0644 \u0627\u0644\u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0627\u062A\u0631\u0641\u0636\u062A\u060C \u0648\u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0627\u0644\u0645\u0637\u0627\u0628\u0642\u0629 \u0639\u062F\u0651\u062A\u060C \u0648\u0627\u0644\u0645\u062E\u0632\u0651\u0646 \u0632\u064A \u0645\u0627 \u0647\u0648", { attempts: expected, resend: true, status: "done", paid: true, method: "cash", rep: "\u0645\u0646\u062F\u0648\u0628 \u0627\u062E\u062A\u0628\u0627\u0631" }, { attempts: actual, resend: same.ok, status: d.deliveryStatus, paid: d.paid === true, method: d.paymentMethod, rep: d.repName });
-    }
-  },
-  {
-    id: "P3-08",
-    title: "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0628\u064A\u062E\u062A\u0641\u064A \u0645\u0646 \u0642\u0627\u064A\u0645\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629 (G5)",
-    run: async (c) => {
-      const a = c.shared.oa;
-      if (!a || a.deliveryStatus !== "done") return c.skip("P3-08", "\u0627\u062E\u062A\u0641\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0641\u064A \u062D\u0627\u0644\u0629 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB");
-      const rows = await fetchOpenDeliveryOrders();
-      if (rows === null) return c.check("P3-08", "\u0642\u0631\u0627\u0621\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u0645\u0641\u062A\u0648\u062D\u0629", "rows", null, "\u0627\u0644\u0627\u0633\u062A\u0639\u0644\u0627\u0645 \u0641\u0634\u0644");
-      c.check("P3-08", "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0645\u0634 \u0638\u0627\u0647\u0631 \u0628\u0639\u062F \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 (\u0648\u0642\u062A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645 \u0642\u062F\u064A\u0645)", { listed: false }, { listed: rows.some((r) => r.id === a.id) });
-    }
-  },
-  {
-    id: "P3-09",
-    title: "\u0627\u0644\u062F\u0641\u0639 \u0639\u0645\u0631\u0647 \u0645\u0627 \u064A\u0631\u062C\u0639 \xAB\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639\xBB \u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u062A\u0628\u0639\u062A \u0648\u0647\u0648 \u0645\u062F\u0641\u0648\u0639 (\u0627\u0644\u0642\u0627\u0639\u062F\u0629 d.paid == true || o.paid == false)",
-    run: async (c) => {
-      const { doc: b, result } = await sysMakeOrder(c, "ob");
-      if (result !== "ok") return c.check("P3-09", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
-      const sentPaid = sysAdvance(b, sysSendPatch({ paid: true, paymentMethod: "cash" }));
-      const r1 = await salesStore._attempt("upsert", sentPaid);
-      const unpay = await c.putDoc("sales_col", b.id, sysAdvance(sentPaid, { paid: false, paymentMethod: null }));
-      const finish = sysAdvance(sentPaid, sysDonePatch());
-      const r3 = await salesStore._attempt("upsert", finish);
-      c.check("P3-09", "\u0625\u0631\u0633\u0627\u0644 \u0645\u062F\u0641\u0648\u0639 \u062B\u0645 \u0645\u062D\u0627\u0648\u0644\u0629 \u062A\u062D\u0648\u064A\u0644\u0647 \u0644\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u062B\u0645 \u0625\u0646\u0647\u0627\u0624\u0647", { sentPaid: "ok", unpayRefused: true, finish: "ok" }, { sentPaid: r1, unpayRefused: unpay.ok === false, finish: r3 });
-      if (r3 !== "ok") c.leftover(`sales_col/${b.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u0628\u0639\u062A\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
-    }
-  },
-  {
-    id: "P3-10",
-    title: "\u0645\u062F\u0641\u0648\u0639 \u0645\u0642\u062F\u0645\u064B\u0627 \u0648\u0642\u062A \u0627\u0644\u0625\u0631\u0633\u0627\u0644 (\u062F\u0641\u0639 \u0645\u0642\u0633\u0651\u0645): \u0628\u064A\u0631\u0648\u062D \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0639\u0644\u0649 \u0637\u0648\u0644 \u0648\u0627\u0644\u0645\u0628\u0627\u0644\u063A \u0628\u062A\u062A\u062E\u0632\u0646 (G1)",
-    run: async (c) => {
-      const { doc: o, result } = await sysMakeOrder(c, "oc");
-      if (result !== "ok") return c.check("P3-10", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
-      const done = sysAdvance(o, sysSendPatch(sysDonePatch({ paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: 3, transferAmount: 4 })));
-      const r = await salesStore._attempt("upsert", done);
-      const g = await c.getDoc("sales_col", o.id);
-      const d = g.data || {};
-      c.check("P3-10", "\u0627\u0644\u062D\u0641\u0638 \u0648\u0627\u0644\u0642\u0631\u0627\u0621\u0629", { result: "ok", status: "done", paid: true, split: true }, { result: r, status: d.deliveryStatus, paid: d.paid === true, split: d.paymentMethod === "split" && d.splitTransferMethod === "instapay" && d.cashAmount === 3 && d.transferAmount === 4 && d.cashAmount + d.transferAmount === d.total });
-      if (r !== "ok") c.leftover(`sales_col/${o.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
-    }
-  },
-  {
-    id: "P3-11",
-    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0623\u0648\u0631\u062F\u0631 \u064A\u062A\u0642\u0641\u0644 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u064A\u062A\u062F\u0641\u0639",
-    run: async (c) => {
-      const { doc: o, result } = await sysMakeOrder(c, "od");
-      if (result !== "ok") return c.check("P3-11", "\u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0623\u0648\u0631\u062F\u0631", "ok", result);
-      const r = await c.putDoc("sales_col", o.id, sysAdvance(o, sysDonePatch({ paid: false, paymentMethod: null, receivedBy: null })));
-      const g = await c.getDoc("sales_col", o.id);
-      const d = g.data || {};
-      c.check("P3-11", "\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u064A\u062A\u0631\u0641\u0636 (\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0627\u0644\u0645\u062E\u0644\u0651\u0635 \u0644\u0627\u0632\u0645 \u064A\u0643\u0648\u0646 \u0645\u062F\u0641\u0648\u0639)", { accepted: false }, { accepted: r.ok === true && d.deliveryStatus === "done" && d.paid === false }, r.ok ? "\u0627\u062A\u0642\u0628\u0644: \u0627\u0644\u0642\u0627\u0639\u062F\u0629 d.paid == true || o.paid == false \u0628\u062A\u0633\u0645\u062D \u0628\u0623\u0648\u0631\u062F\u0631 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639. \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0646\u0641\u0633\u0647 \u0645\u0627 \u0628\u064A\u0639\u0645\u0644\u0634 \u0643\u062F\u0647\u060C \u0644\u0643\u0646 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0628\u064A\u0633\u0645\u062D." : "");
-      if (r.ok) c.note("\u0644\u0648 \u062F\u0647 \u0627\u062A\u0642\u0628\u0644\u060C \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0628\u064A\u062A\u0642\u0641\u0644 \u0646\u0647\u0627\u0626\u064A\u064B\u0627 \u0648\u0647\u0648 \xAB\u062A\u0645 \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645\xBB \u0648\u063A\u064A\u0631 \u0645\u062F\u0641\u0648\u0639 \u0648\u0645\u0634 \u0628\u064A\u062A\u062D\u0633\u0628 \u0641\u064A \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631. \u0627\u0644\u062D\u0644 \u0627\u0644\u0645\u0642\u062A\u0631\u062D \u062A\u0639\u062F\u064A\u0644 \u0641\u064A firestore.rules (\u0645\u0627 \u0627\u062A\u0639\u0645\u0644\u0634).");
-      else c.leftover(`sales_col/${o.id}`, "\u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u062F\u0647 \u0641\u0636\u0644 \xAB\u0627\u062A\u062C\u0647\u0632\xBB \u0648\u0628\u064A\u0638\u0647\u0631 \u0641\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u0627\u062A \u2014 \u0627\u0642\u0641\u0644\u0647 \u0623\u0648 \u0627\u0645\u0633\u062D\u0647 \u0645\u0646 Console");
-    }
-  },
-  {
-    id: "P3-12",
-    title: "\u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0627 \u0628\u064A\u062A\u062D\u0642\u0642\u0634 \u0645\u0646 \u0627\u0644\u0623\u0633\u0639\u0627\u0631: \u0625\u062C\u0645\u0627\u0644\u064A \u0635\u0641\u0631 \u0648\u0625\u062C\u0645\u0627\u0644\u064A \u0645\u0634 \u0645\u0637\u0627\u0628\u0642 \u0644\u0644\u0623\u0635\u0646\u0627\u0641 \u0628\u064A\u062A\u0642\u0628\u0644\u0648\u0627 (H6)",
-    run: async (c) => {
-      if (c.unapproved) return c.skip("P3-12", "\u0623\u0633\u0639\u0627\u0631 \u063A\u0631\u064A\u0628\u0629", "\u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647");
-      const zero = c.sale("p_zero", { total: 0, items: [{ productName: `${SYSTEM_TEST_PREFIX}item`, unitPrice: 0, qty: 1, lineTotal: 0 }] });
-      const mismatch = c.sale("p_mismatch", { total: 99 });
-      const rz = await salesStore._attempt("upsert", zero);
-      const rm = await salesStore._attempt("upsert", mismatch);
-      c.leftover(`sales_col/${zero.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0625\u062C\u0645\u0627\u0644\u064A \u0635\u0641\u0631");
-      c.leftover(`sales_col/${mismatch.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0625\u062C\u0645\u0627\u0644\u064A \u0645\u0634 \u0645\u0637\u0627\u0628\u0642 \u0644\u0644\u0623\u0635\u0646\u0627\u0641");
-      c.check("P3-12", "\u0627\u062A\u0642\u0628\u0644\u0648\u0627 \u0627\u0644\u0627\u062A\u0646\u064A\u0646 (\u0627\u0644\u0642\u0648\u0627\u0639\u062F \u0628\u062A\u062A\u0623\u0643\u062F \u0625\u0646 \u0627\u0644\u0625\u062C\u0645\u0627\u0644\u064A \u0631\u0642\u0645 \u0645\u0648\u062C\u0628 \u0628\u0633)", { zeroTotal: "ok", totalMismatch: "ok" }, { zeroTotal: rz, totalMismatch: rm });
-      c.note("\u064A\u0639\u0646\u064A \u0627\u0644\u062D\u0645\u0627\u064A\u0629 \u0627\u0644\u0648\u062D\u064A\u062F\u0629 \u0644\u0644\u0623\u0633\u0639\u0627\u0631 \u0647\u064A \u0634\u0627\u0634\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0646\u0641\u0633\u0647\u0627. \u0644\u0648 \u0627\u0644\u0636\u063A\u0637 \u0627\u0644\u0645\u0637\u0648\u0651\u0644 \u0639\u0644\u0649 \u0633\u0639\u0631 \u0627\u0644\u0633\u0637\u0631 (A14) \u0641\u0639\u0644\u064B\u0627 \u0628\u064A\u0633\u0645\u062D \u0644\u0623\u064A \u0645\u0648\u0638\u0641 \u064A\u063A\u064A\u0651\u0631 \u0627\u0644\u0633\u0639\u0631\u060C \u064A\u0628\u0642\u0649 \u0645\u0641\u064A\u0634 \u062D\u0627\u062C\u0629 \u062A\u0645\u0646\u0639\u0647 \u064A\u0628\u064A\u0639 \u0628\u0635\u0641\u0631. A14 \u0644\u0633\u0647 \u0645\u062D\u062A\u0627\u062C \u0641\u062D\u0635 \u0645\u0646\u0641\u0635\u0644.");
-    }
-  },
-  {
-    id: "P3-13",
-    title: "\u062A\u0644\u064A\u0641\u0648\u0646 \u0627\u0644\u0632\u0628\u0648\u0646: \u0661\u0661 \u0631\u0642\u0645 \u064A\u0628\u062F\u0623 \u0628\u0640010/011/012/015\u060C \u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629 \u0648\u0645\u0633\u0627\u0641\u0627\u062A \u0648\u0634\u0631\u0637\u0627\u062A \u0645\u0642\u0628\u0648\u0644\u0629 (G2)",
-    run: async (c) => {
-      const ok = (s) => validateEgyptPhone(s) === null;
-      const valid = ["01012345678", "010 1234 5678", "010-1234-5678", "\u0660\u0661\u0660\u0661\u0662\u0663\u0664\u0665\u0666\u0667\u0668", "01512345678"];
-      const invalid = ["0101234567", "010123456789", "01312345678", "01412345678", "01612345678", "01912345678", "", "abc", "+201012345678"];
-      c.check("P3-13", "\u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0627\u0644\u0635\u062D\u064A\u062D\u0629 \u0628\u062A\u0639\u062F\u0651\u064A \u0648\u0627\u0644\u063A\u0644\u0637 \u0628\u064A\u062A\u0631\u0641\u0636", { valid: valid.map(() => true), invalid: invalid.map(() => false) }, { valid: valid.map(ok), invalid: invalid.map(ok) });
-      c.note("\u0627\u0644\u0631\u0642\u0645 \u0627\u0644\u0644\u064A \u0628\u064A\u0628\u062F\u0623 \u0628\u0640+20 \u0628\u064A\u062A\u0631\u0641\u0636 (\u0661\u0662 \u0631\u0642\u0645 \u0628\u0639\u062F \u0634\u064A\u0644 \u0627\u0644\u0639\u0644\u0627\u0645\u0627\u062A). \u0644\u0648 \u0627\u0644\u0645\u0648\u0638\u0641\u064A\u0646 \u0628\u064A\u0644\u0635\u0642\u0648\u0627 \u0627\u0644\u0623\u0631\u0642\u0627\u0645 \u0643\u062F\u0647\u060C \u0645\u0645\u0643\u0646 \u0646\u0642\u0628\u0644\u0647 \u0648\u0646\u0634\u064A\u0644 20.");
-    }
-  },
-  {
-    id: "P3-14",
-    title: "\u0627\u0644\u062A\u062D\u0642\u0642 \u0645\u0646 \u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u062F\u0641\u0639 \u0639\u0646\u062F \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0648\u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645: \u062F\u0641\u0639 \u0645\u0642\u0633\u0651\u0645 (G4)",
-    run: async (c) => {
-      const v = (pm, price) => validatePaymentMethod(pm, price) === null;
-      const cases = [
-        ["\u0645\u0646 \u063A\u064A\u0631 \u0637\u0631\u064A\u0642\u0629", { paymentMethod: "" }, 7, false],
-        ["\u0643\u0627\u0634", { paymentMethod: "cash" }, 7, true],
-        ["\u0641\u0648\u062F\u0627\u0641\u0648\u0646 \u0643\u0627\u0634", { paymentMethod: "vodafone_cash" }, 7, true],
-        ["\u0645\u0642\u0633\u0651\u0645 \u0645\u0646 \u063A\u064A\u0631 \u0648\u0633\u064A\u0644\u0629 \u062A\u062D\u0648\u064A\u0644", { paymentMethod: "split", splitTransferMethod: "", cashAmount: "3", transferAmount: "4" }, 7, false],
-        ["\u0645\u0642\u0633\u0651\u0645 \u0628\u0645\u0628\u0627\u0644\u063A \u0641\u0627\u0636\u064A\u0629", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "", transferAmount: "" }, 7, false],
-        ["\u0645\u0642\u0633\u0651\u0645 \u0645\u062C\u0645\u0648\u0639\u0647 \u0623\u0642\u0644", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "3" }, 7, false],
-        ["\u0645\u0642\u0633\u0651\u0645 \u0641\u0631\u0642 \u0660\u066B\u0660\u0662", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "4.02" }, 7, false],
-        ["\u0645\u0642\u0633\u0651\u0645 \u0641\u0631\u0642 \u0660\u066B\u0660\u0660\u0665", { paymentMethod: "split", splitTransferMethod: "instapay", cashAmount: "3", transferAmount: "4.005" }, 7, true],
-        ["\u0645\u0642\u0633\u0651\u0645 \u0628\u0623\u0631\u0642\u0627\u0645 \u0639\u0631\u0628\u064A\u0629", { paymentMethod: "split", splitTransferMethod: "vodafone_cash", cashAmount: "\u0663", transferAmount: "\u0664" }, 7, true]
-      ];
-      c.check("P3-14", "\u0643\u0644 \u062D\u0627\u0644\u0629 \u0628\u062A\u062F\u064A\u0643 \u0627\u0644\u0631\u062F \u0627\u0644\u0645\u062A\u0648\u0642\u0639", cases.map((x) => [x[0], x[3]]), cases.map((x) => [x[0], v(x[1], x[2])]));
-    }
-  },
-  {
-    id: "P3-M1",
-    title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u062A\u0648\u0635\u064A\u0644",
-    run: async (c) => {
-      c.skip("P3-M1a", "\u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0641\u0627\u0636\u064A\u0629 \u0641\u064A \u0646\u0627\u0641\u0630\u0629 \u0627\u0644\u062F\u0641\u0639 (\u062F\u0644\u064A\u0641\u0631\u064A)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0643\u062A\u0628 \u0623\u0648\u0631\u062F\u0631 \u0645\u0646 \u063A\u064A\u0631 \u0645\u0646\u0637\u0642\u0629\u060C \u0644\u0627\u0632\u0645 \u062A\u0638\u0647\u0631 \xAB\u0627\u0643\u062A\u0628 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u0623\u0648 \u0627\u0633\u0645 \u0627\u0644\u0645\u062D\u0644\xBB \u0648\u0645\u0627\u064A\u062A\u062D\u0641\u0638\u0634");
-      c.skip("P3-M1b", "\u062A\u0628\u0648\u064A\u0628 \xAB\u0623\u0648\u0631\u062F\u0631\u0627\u062A\u064A\xBB \u0644\u0644\u0645\u0648\u0638\u0641", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0639\u0645\u0644 \u0623\u0648\u0631\u062F\u0631 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641 \u0648\u062A\u0623\u0643\u062F \u0625\u0646\u0647 \u0628\u064A\u0638\u0647\u0631 \u0639\u0646\u062F\u0647\u060C \u0648\u0625\u0646 \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u0645\u0646 \u063A\u064A\u0631 \u0635\u0644\u0627\u062D\u064A\u0629 viewAllOrders \u0645\u0627 \u0628\u064A\u0634\u0648\u0641\u0648\u0634 \u0641\u064A \xAB\u0623\u0648\u0631\u062F\u0631\u0627\u062A\u064A\xBB");
-      c.skip("P3-M1c", "\u0632\u0631\u0627\u0631 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0644\u0635\u0627\u062D\u0628 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 \u0628\u0633", "\u270B \u064A\u062F\u0648\u064A: \u0645\u0648\u0638\u0641 \u062A\u0627\u0646\u064A \u064A\u0641\u062A\u062D \u0627\u0644\u0623\u0648\u0631\u062F\u0631\u060C \u0644\u0627\u0632\u0645 \u064A\u0644\u0627\u0642\u064A \xAB\u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u0625\u0631\u0633\u0627\u0644\xBB \u0645\u062E\u0641\u064A (\u0627\u0644\u0634\u0627\u0634\u0629 \u0628\u0633 \u0647\u064A \u0627\u0644\u0644\u064A \u0628\u062A\u0645\u0646\u0639)");
-      c.skip("P3-M1d", "\u062A\u062D\u0630\u064A\u0631\u0627\u062A \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0639\u0644\u0649 \u0627\u0644\u0623\u0648\u0631\u062F\u0631 (G4)", "\u270B \u064A\u062F\u0648\u064A: \u0646\u0641\u0633 \u062A\u062D\u0630\u064A\u0631\u0627\u062A \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0627\u0644\u0623\u0635\u0641\u0631 \u0641\u064A \u0627\u0644\u062F\u0644\u064A\u0641\u0631\u064A \u0632\u064A \u0627\u0644\u0627\u0633\u062A\u0644\u0627\u0645");
-    }
-  }
-];
-const SYS_PARTS = [
-  { id: "S1", title: "\u0627\u0644\u062E\u0637\u0648\u0629 1 \u2014 \u0645\u0644\u062E\u0635 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 (\u0627\u0644\u0641\u062D\u0635 \u0627\u0644\u0642\u062F\u064A\u0645)", legacy: true },
-  { id: "P1", title: "\u0627\u0644\u062C\u0632\u0621 1 \u2014 \u0627\u0644\u0628\u064A\u0639 \u0627\u0644\u062D\u0642\u064A\u0642\u064A \u0648\u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A", checks: SYS_PART1_CHECKS },
-  { id: "P2", title: "\u0627\u0644\u062C\u0632\u0621 2 \u2014 \u0627\u0644\u062A\u0642\u0627\u0631\u064A\u0631 \u0648\u0627\u0644\u064A\u0648\u0645 \u0627\u0644\u062A\u062C\u0627\u0631\u064A \u0648\u0627\u0644\u062A\u0635\u0641\u064A\u0631 \u0648\u0627\u0644\u062D\u0633\u0627\u0628\u0627\u062A \u0627\u0644\u0645\u0639\u0644\u0651\u0642\u0629", checks: SYS_PART2_CHECKS, allowUnapproved: true },
-  { id: "P3", title: "\u0627\u0644\u062C\u0632\u0621 3 \u2014 \u0623\u0648\u0631\u062F\u0631\u0627\u062A \u0627\u0644\u062A\u0648\u0635\u064A\u0644", checks: SYS_PART3_CHECKS }
-];
-async function sysRunPart(part, acct, runId, log, sink) {
-  log(`
-\u2501\u2501 ${part.title} \u2501\u2501`);
-  if (part.legacy) {
-    const out = await runSystemTestStep1(acct.step1Role, log);
-    (out.results || []).forEach((r) => sink.results.push({ id: r.id, title: r.title, expected: r.expectedOk, actual: r.actualOk, match: r.match }));
-    return;
-  }
-  const token = await ensureAuth();
-  const c = sysMakeContext(acct, runId, log, sink, token);
-  for (const chk of part.checks) {
-    try {
-      await chk.run(c);
-    } catch (e) {
-      sink.results.push({ id: chk.id, title: chk.title, match: false, error: String(e && e.message || e) });
-      log(`\u{1F4A5} ${chk.id} ${chk.title}
-    \u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639: ${e && e.message || e}`);
-    }
-  }
-}
-function sysSummary(sink) {
-  const ok = sink.results.filter((r) => r.match === true).length;
-  const bad = sink.results.filter((r) => r.match === false).length;
-  const skipped = sink.results.filter((r) => r.skipped).length;
-  return { ok, bad, skipped };
-}
-(function mountSystemTestOverlay() {
-  try {
-    const btn = document.createElement("button");
-    btn.id = "sys-test-open";
-    btn.textContent = "\u{1F9EA}";
-    btn.setAttribute(
-      "style",
-      "position:fixed;left:10px;bottom:calc(90px + env(safe-area-inset-bottom, 0px));z-index:2147483646;width:44px;height:44px;border-radius:22px;border:0;background:#111827;color:#fff;font-size:20px;opacity:.85;"
-    );
-    document.body.appendChild(btn);
-    const panel = document.createElement("div");
-    panel.id = "sys-test-panel";
-    panel.setAttribute(
-      "style",
-      "display:none;position:fixed;inset:0;z-index:2147483647;background:#F9FAFB;color:#111827;overflow:auto;direction:rtl;padding:calc(28px + env(safe-area-inset-top, 0px)) 14px 24px;font:14px/1.6 system-ui,sans-serif;"
-    );
-    const bs = "padding:10px 14px;border:0;border-radius:8px;color:#fff;font-size:14px;margin:3px 0;";
-    panel.innerHTML = '<div style="font-weight:700;font-size:16px">\u{1F9EA} \u0641\u062D\u0648\u0635\u0627\u062A \u062D\u064A\u0629</div><div style="margin:8px 0;padding:8px;border-radius:8px;background:#FEF3C7;color:#78350F">\u0627\u0644\u0641\u062D\u0648\u0635\u0627\u062A \u0628\u062A\u0643\u062A\u0628 \u0628\u064A\u0627\u0646\u0627\u062A \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0639\u0644\u0649 Firebase \u0627\u0644\u062A\u062C\u0631\u064A\u0628\u064A (\u0643\u0644\u0647\u0627 \u0628\u0648\u0633\u0645 ' + SYSTEM_TEST_PREFIX + '). \u0645\u0645\u0643\u0646 \u062A\u0638\u0647\u0631 \u0631\u0633\u0627\u064A\u0644 \u062E\u0637\u0623 \u062D\u0645\u0631\u0627 \u0641\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0648\u0642\u062A \u0627\u0644\u0641\u062D\u0635 \u2014 \u0639\u0627\u062F\u064A. \u0634\u063A\u0651\u0644 \u0646\u0641\u0633 \u0627\u0644\u062C\u0632\u0621 \u0645\u0631\u0629 \u0628\u062D\u0633\u0627\u0628 \u0627\u0644\u0623\u062F\u0645\u0646 \u0648\u0645\u0631\u0629 \u0628\u062D\u0633\u0627\u0628 \u0645\u0648\u0638\u0641.</div><div id="sys-test-acct" style="margin:6px 0;font-weight:700"></div><div id="sys-test-parts"></div><button id="sys-test-all" style="' + bs + 'background:#2563EB">\u0634\u063A\u0651\u0644 \u0643\u0644 \u0627\u0644\u0623\u062C\u0632\u0627\u0621</button> <button id="sys-test-copy" style="' + bs + 'background:#374151">\u0646\u0633\u062E \u0627\u0644\u062A\u0642\u0631\u064A\u0631</button> <button id="sys-test-close" style="' + bs + 'background:#6B7280">\u0625\u063A\u0644\u0627\u0642</button><pre id="sys-test-log" style="white-space:pre-wrap;word-break:break-word;margin-top:12px;font:12px/1.7 ui-monospace,monospace;direction:rtl;text-align:right"></pre>';
-    document.body.appendChild(panel);
-    const logEl = panel.querySelector("#sys-test-log");
-    const acctEl = panel.querySelector("#sys-test-acct");
-    const partsEl = panel.querySelector("#sys-test-parts");
-    const allBtn = panel.querySelector("#sys-test-all");
-    let acct = null;
-    let busy = false;
-    let lastReport = null;
-    const log = (line) => {
-      logEl.textContent += line + "\n";
-    };
-    const setBusy = (v) => {
-      busy = v;
-      panel.querySelectorAll("button[data-part], #sys-test-all").forEach((b) => {
-        b.disabled = v;
-      });
-    };
-    partsEl.innerHTML = SYS_PARTS.map((p) => `<button data-part="${p.id}" style="${bs}background:#0F766E;display:block;width:100%;text-align:right">\u25B6 ${p.title}</button>`).join("");
-    const refreshAccount = async () => {
-      acctEl.textContent = "\u0628\u0642\u0631\u0627 \u0627\u0644\u062D\u0633\u0627\u0628...";
-      acct = await sysDetectAccount();
-      acctEl.textContent = `\u0627\u0644\u062D\u0633\u0627\u0628 \u0627\u0644\u062D\u0627\u0644\u064A: ${acct.label}`;
-    };
-    const runParts = async (partIds) => {
-      if (busy) return;
-      setBusy(true);
-      logEl.textContent = "";
-      try {
-        await refreshAccount();
-        log(`\u0627\u0644\u0645\u0634\u0631\u0648\u0639: ${FIREBASE_PROJECT_ID}`);
-        if (FIREBASE_PROJECT_ID !== SYSTEM_TEST_EXPECTED_PROJECT) {
-          log("\u26D4 \u0648\u0642\u0641\u062A: \u0627\u0644\u0645\u0634\u0631\u0648\u0639 \u0645\u0634 \u0627\u0644\u0645\u062A\u0648\u0642\u0639. \u0645\u0627 \u0643\u062A\u0628\u062A\u0634 \u062D\u0627\u062C\u0629.");
-          return;
-        }
-        if (!acct.ok) {
-          log("\u26D4 \u0645\u0627 \u0642\u062F\u0631\u062A\u0634 \u0623\u0642\u0631\u0627 \u0627\u0644\u062D\u0633\u0627\u0628 (\u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644\u061F). \u062C\u0631\u0651\u0628 \u062A\u0627\u0646\u064A.");
-          return;
-        }
-        const unapproved = acct.role === "pending" || acct.role === "unknown";
-        const runId = Date.now().toString(36);
-        const sink = { results: [], leftovers: [] };
-        log(`\u0627\u0644\u062D\u0633\u0627\u0628: ${acct.email} \u2014 \u0627\u0644\u0646\u0648\u0639: ${acct.role === "admin" ? "\u0623\u062F\u0645\u0646" : acct.role === "employee" ? "\u0645\u0648\u0638\u0641 \u0639\u0627\u062F\u064A" : "\u063A\u064A\u0631 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647"} \u2014 \u0631\u0642\u0645 \u0627\u0644\u062A\u0634\u063A\u064A\u0644\u0629: ${runId}`);
-        for (const id of partIds) {
-          const part = SYS_PARTS.find((p) => p.id === id);
-          if (unapproved && !part.allowUnapproved) {
-            log(`
-\u2501\u2501 ${part.title} \u2501\u2501
-\u23ED\uFE0F \u0627\u062A\u062E\u0637\u064A\u062A\u0647: \u0627\u0644\u062C\u0632\u0621 \u062F\u0647 \u0645\u062D\u062A\u0627\u062C \u062D\u0633\u0627\u0628 \u0623\u062F\u0645\u0646 \u0623\u0648 \u0645\u0648\u0638\u0641 \u0645\u0648\u0627\u0641\u0642 \u0639\u0644\u064A\u0647.`);
-            continue;
-          }
-          await sysRunPart(part, acct, runId, log, sink);
-        }
-        const s = sysSummary(sink);
-        log("");
-        log("\u2014 \u0645\u0633\u062A\u0646\u062F\u0627\u062A \u062A\u062C\u0631\u064A\u0628\u064A\u0629 \u0641\u0627\u0636\u0644\u0629 (\u0645\u0634 \u0628\u062A\u062A\u0645\u0633\u062D \u0645\u0646 \u0627\u0644\u062A\u0637\u0628\u064A\u0642) \u2014");
-        if (sink.leftovers.length === 0) log("\u0645\u0641\u064A\u0634.");
-        else sink.leftovers.forEach((l) => log("\u2022 " + l));
-        log("");
-        log(`\u0627\u0644\u0646\u062A\u064A\u062C\u0629: \u2705 ${s.ok} \u0645\u0637\u0627\u0628\u0642 | \u274C ${s.bad} \u0645\u062E\u0627\u0644\u0641 | \u23ED\uFE0F ${s.skipped} \u0645\u062A\u062E\u0637\u064A`);
-        lastReport = { app: "FaAroon live-check", schema: 1, when: (/* @__PURE__ */ new Date()).toISOString(), project: FIREBASE_PROJECT_ID, runId, account: { email: acct.email, role: acct.role }, parts: partIds, summary: s, results: sink.results, leftovers: sink.leftovers };
-      } catch (e) {
-        log(`\u26D4 \u062E\u0637\u0623 \u063A\u064A\u0631 \u0645\u062A\u0648\u0642\u0639: ${e && e.message ? e.message : e}`);
-      } finally {
-        setBusy(false);
-      }
-    };
-    btn.onclick = async () => {
-      panel.style.display = "block";
-      if (!busy) await refreshAccount();
-    };
-    panel.querySelector("#sys-test-close").onclick = () => {
-      panel.style.display = "none";
-    };
-    partsEl.onclick = (e) => {
-      const id = e.target && e.target.getAttribute && e.target.getAttribute("data-part");
-      if (id) runParts([id]);
-    };
-    allBtn.onclick = () => runParts(SYS_PARTS.map((p) => p.id));
-    panel.querySelector("#sys-test-copy").onclick = async () => {
-      const text = logEl.textContent + (lastReport ? "\n\n--- JSON ---\n" + JSON.stringify(lastReport) : "");
-      try {
-        await navigator.clipboard.writeText(text);
-        log("\u{1F4CB} \u0627\u062A\u0646\u0633\u062E \u0627\u0644\u062A\u0642\u0631\u064A\u0631");
-      } catch (e) {
-        log("\u062A\u0639\u0630\u0631 \u0627\u0644\u0646\u0633\u062E \u062A\u0644\u0642\u0627\u0626\u064A\u060C \u0627\u0636\u063A\u0637 \u0645\u0637\u0648\u0644\u064B\u0627 \u0639\u0644\u0649 \u0627\u0644\u0646\u0635 \u0648\u0627\u0646\u0633\u062E\u0647.");
-      }
-    };
-  } catch (e) {
-  }
-})();
 const rootEl = document.getElementById("root");
 ReactDOM.createRoot(rootEl).render(/* @__PURE__ */ React.createElement(App, null));
