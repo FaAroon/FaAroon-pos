@@ -104,6 +104,10 @@ function classifyErrorType(detail) {
   if (status === "400" && /requires an index/i.test(rest)) return "2";
   return "9";
 }
+function shouldShowStoreError(code, online) {
+  if (online === false && /-1$/.test(String(code || ""))) return false;
+  return true;
+}
 function notifyStoreError(collectionName, detail) {
   const loc = ERROR_LOCATIONS[collectionName] || "00";
   const type = classifyErrorType(detail);
@@ -469,6 +473,23 @@ function fromFirestoreFields(fields) {
   });
   return obj;
 }
+let WRITE_TIMEOUT_MS = 2e4;
+let CLAIM_TIMEOUT_MS = 8e3;
+let SYNC_REPLAY_TIMEOUT_MS = 6e4;
+function withDeadline(ms, run) {
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try {
+        if (ctrl) ctrl.abort();
+      } catch (e) {
+      }
+      reject(new Error("request timed out"));
+    }, ms);
+  });
+  return Promise.race([run(ctrl ? ctrl.signal : void 0), timeout]).finally(() => clearTimeout(timer));
+}
 const OFFLINE_QUEUE_KEY = "dev_alawadly_offline_queue_v1";
 function getOfflineQueue() {
   try {
@@ -495,35 +516,51 @@ let offlineQueueIdSeq = 0;
 function nextOfflineQueueId() {
   return `${Date.now()}_${++offlineQueueIdSeq}`;
 }
-function queueOfflineOp(collectionName, type, payload) {
+function queueOfflineOp(collectionName, type, payload, opts) {
   const q = getOfflineQueue();
   const id = type === "remove" ? payload : payload.id;
   const filtered = q.filter((op) => !(op.collectionName === collectionName && (op.type === "remove" ? op.payload : op.payload.id) === id));
-  filtered.push({ qid: nextOfflineQueueId(), collectionName, type, payload, queuedAt: Date.now() });
+  const entry = { qid: nextOfflineQueueId(), collectionName, type, payload, queuedAt: Date.now() };
+  if (opts && opts.createOnly && type === "upsert") entry.createOnly = true;
+  filtered.push(entry);
   if (!setOfflineQueueRaw(filtered)) return false;
   notifyQueueChange();
   return true;
 }
 function makeCollectionStore(collectionName) {
   const base = `${FIRESTORE_BASE}/${collectionName}`;
-  async function attempt(type, payload) {
+  async function attempt(type, payload, timeoutMs = WRITE_TIMEOUT_MS, opts) {
+    const createOnly = !!(opts && opts.createOnly) && type === "upsert";
     try {
-      const send = (token) => type === "remove" ? fetch(`${base}/${payload}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }) : fetch(`${base}/${payload.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ fields: toFirestoreFields(payload) })
+      return await withDeadline(timeoutMs, async (signal) => {
+        const send = (token) => type === "remove" ? fetch(`${base}/${payload}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal }) : fetch(`${base}/${payload.id}${createOnly ? "?currentDocument.exists=false" : ""}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ fields: toFirestoreFields(payload) }),
+          signal
+        });
+        let res = await send(await ensureAuth());
+        if (res.status === 401) {
+          invalidateIdToken();
+          res = await send(await ensureAuth());
+        }
+        if (!res.ok && createOnly && res.status === 409) {
+          let already = false;
+          try {
+            const d = await (typeof res.clone === "function" ? res.clone() : res).json();
+            const e = Array.isArray(d) ? d[0]?.error : d?.error;
+            already = !!e && e.status === "ALREADY_EXISTS";
+          } catch {
+          }
+          if (already) return "ok";
+        }
+        if (!res.ok) {
+          notifyStoreError(collectionName, await readErrorDetail(res));
+          if (res.status >= 500 || res.status === 429 || res.status === 408 || res.status === 401) return "retry";
+          return "drop";
+        }
+        return "ok";
       });
-      let res = await send(await ensureAuth());
-      if (res.status === 401) {
-        invalidateIdToken();
-        res = await send(await ensureAuth());
-      }
-      if (!res.ok) {
-        notifyStoreError(collectionName, await readErrorDetail(res));
-        if (res.status >= 500 || res.status === 429 || res.status === 408 || res.status === 401) return "retry";
-        return "drop";
-      }
-      return "ok";
     } catch (e) {
       console.error(`firestore ${type} ${collectionName} failed`, e);
       notifyStoreError(collectionName, e.message);
@@ -1090,44 +1127,50 @@ function takeNextInvoiceNumber(settings) {
   const updatedSettings = { ...settings, nextNumber: number + 1, lastResetKey: key };
   return { number, updatedSettings };
 }
-async function claimNextInvoiceNumber(fallbackSettings) {
+async function claimNextInvoiceNumber(fallbackSettings, timeoutMs = CLAIM_TIMEOUT_MS) {
   const docUrl = `${FIRESTORE_BASE}/settings_col/invoice_number_settings`;
-  for (let attempt = 0; attempt < 6; attempt++) {
-    let token;
-    try {
-      token = await ensureAuth();
-    } catch (e) {
-      break;
-    }
-    let settings = fallbackSettings;
-    let precondition = "currentDocument.exists=false";
-    try {
-      const getRes = await fetch(docUrl, { headers: { Authorization: `Bearer ${token}` } });
-      if (getRes.ok) {
-        const doc = await getRes.json();
-        settings = { ...DEFAULT_INVOICE_NUMBER_SETTINGS, ...fromFirestoreFields(doc.fields) };
-        precondition = `currentDocument.updateTime=${encodeURIComponent(doc.updateTime)}`;
-      } else if (getRes.status !== 404) {
+  const claimed = await withDeadline(timeoutMs, async (signal) => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (signal && signal.aborted) break;
+      let token;
+      try {
+        token = await ensureAuth();
+      } catch (e) {
         break;
       }
-    } catch (e) {
-      break;
-    }
-    const { number, updatedSettings } = takeNextInvoiceNumber(settings);
-    try {
-      const patchRes = await fetch(`${docUrl}?${precondition}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ fields: toFirestoreFields(updatedSettings) })
-      });
-      if (patchRes.ok) {
-        return { number, updatedSettings };
+      let settings = fallbackSettings;
+      let precondition = "currentDocument.exists=false";
+      try {
+        const getRes = await fetch(docUrl, { headers: { Authorization: `Bearer ${token}` }, signal });
+        if (getRes.ok) {
+          const doc = await getRes.json();
+          settings = { ...DEFAULT_INVOICE_NUMBER_SETTINGS, ...fromFirestoreFields(doc.fields) };
+          precondition = `currentDocument.updateTime=${encodeURIComponent(doc.updateTime)}`;
+        } else if (getRes.status !== 404) {
+          break;
+        }
+      } catch (e) {
+        break;
       }
-      await new Promise((r) => setTimeout(r, 80 + Math.random() * 160));
-    } catch (e) {
-      break;
+      const { number, updatedSettings } = takeNextInvoiceNumber(settings);
+      try {
+        const patchRes = await fetch(`${docUrl}?${precondition}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ fields: toFirestoreFields(updatedSettings) }),
+          signal
+        });
+        if (patchRes.ok) {
+          return { number, updatedSettings };
+        }
+        await new Promise((r) => setTimeout(r, 80 + Math.random() * 160));
+      } catch (e) {
+        break;
+      }
     }
-  }
+    return null;
+  }).catch(() => null);
+  if (claimed) return claimed;
   return takeNextInvoiceNumber(fallbackSettings);
 }
 const STORE_BY_COLLECTION = {
@@ -1372,7 +1415,7 @@ async function syncOfflineQueue() {
         finishedIds.add(op.qid);
         continue;
       }
-      const result = await store._attempt(op.type, op.payload);
+      const result = await store._attempt(op.type, op.payload, SYNC_REPLAY_TIMEOUT_MS, { createOnly: !!op.createOnly });
       if (result !== "retry") finishedIds.add(op.qid);
     }
   } finally {
@@ -3265,7 +3308,7 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
       playBeep("error");
       return;
     }
-    if (result === "retry" && !queueOfflineOp("sales_col", "upsert", sale)) {
+    if (result === "retry" && !queueOfflineOp("sales_col", "upsert", sale, { createOnly: true })) {
       checkoutBusyRef.current = false;
       setCheckoutBusy(false);
       setShowCheckout(false);
@@ -3337,7 +3380,7 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
       playBeep("error");
       return;
     }
-    if (result === "retry" && !queueOfflineOp("sales_col", "upsert", sale)) {
+    if (result === "retry" && !queueOfflineOp("sales_col", "upsert", sale, { createOnly: true })) {
       checkoutBusyRef.current = false;
       setCheckoutBusy(false);
       setShowCheckout(false);
@@ -5095,6 +5138,7 @@ function App() {
   }, []);
   useEffect(() => {
     const handler = (e) => {
+      if (!shouldShowStoreError(e.detail && e.detail.code, navigator.onLine)) return;
       setSyncError(e.detail);
       setTimeout(() => setSyncError(null), 1e4);
     };
@@ -7038,33 +7082,35 @@ const SYS_PART4_CHECKS = [
   },
   {
     id: "P4-08",
-    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0644\u0648 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0627 \u0631\u062F\u0651\u0634 \u062E\u0627\u0644\u0635\u060C \u0627\u0644\u062D\u0641\u0638 \u0644\u0627\u0632\u0645 \u064A\u062A\u0648\u0642\u0641 \u0628\u0639\u062F \u0648\u0642\u062A \u0645\u0639\u0642\u0648\u0644 (F8)",
+    title: "\u0644\u0648 \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0627 \u0631\u062F\u0651\u0634 \u062E\u0627\u0644\u0635\u060C \u0627\u0644\u062D\u0641\u0638 \u0628\u064A\u062A\u0648\u0642\u0641 \u0628\u0639\u062F \u0627\u0644\u0645\u0647\u0644\u0629 \u0648\u064A\u0631\u0648\u062D \u0644\u0644\u0637\u0627\u0628\u0648\u0631 (F8 \u2014 fix #64)",
     run: async (c) => {
       const doc = c.sale("hang");
-      let settled = false;
+      let result = "\u0644\u0633\u0647 \u0645\u0633\u062A\u0646\u064A";
       const spy = sysInstallFault(doc.id, () => new Promise(() => {
       }));
-      salesStore._attempt("upsert", doc).then(() => {
-        settled = true;
+      salesStore._attempt("upsert", doc, 1500).then((r) => {
+        result = r;
       });
-      await sysSleep(6e3);
+      await sysSleep(4e3);
       spy.restore();
-      c.check("P4-08", "\u0627\u0644\u062D\u0641\u0638 \u062E\u0644\u0651\u0635 \u062E\u0644\u0627\u0644 \u0666 \u062B\u0648\u0627\u0646\u064A\u061F", { settledWithin6s: true }, { settledWithin6s: settled }, settled ? "" : "\u0645\u0641\u064A\u0634 \u0645\u0647\u0644\u0629 \u0639\u0644\u0649 \u0627\u0644\u0643\u062A\u0627\u0628\u0629: \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0647\u064A\u0641\u0636\u0644 \xAB\u062C\u0627\u0631\u064A \u0627\u0644\u062D\u0641\u0638\xBB \u0644\u062D\u062F \u0645\u0627 \u0627\u0644\u0645\u062A\u0635\u0641\u062D \u064A\u0633\u062A\u0633\u0644\u0645 (\u0645\u0645\u0643\u0646 \u062F\u0642\u0627\u064A\u0642)\u060C \u0648\u0645\u0634 \u0628\u064A\u0631\u0648\u062D \u0644\u0644\u0637\u0627\u0628\u0648\u0631.");
+      c.check("P4-08", "\u0646\u062A\u064A\u062C\u0629 \u0627\u0644\u062D\u0641\u0638 \u0627\u0644\u0644\u064A \u0645\u0627 \u062D\u062F\u0651\u0634 \u0631\u062F \u0639\u0644\u064A\u0647 \u0628\u0639\u062F \u0645\u0647\u0644\u0629 \u0642\u0635\u064A\u0631\u0629", "retry", result, result === "\u0644\u0633\u0647 \u0645\u0633\u062A\u0646\u064A" ? "\u0645\u0641\u064A\u0634 \u0645\u0647\u0644\u0629 \u0634\u063A\u0627\u0644\u0629: \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0647\u064A\u0641\u0636\u0644 \xAB\u062C\u0627\u0631\u064A \u0627\u0644\u062D\u0641\u0638\xBB \u0648\u0645\u0634 \u0628\u064A\u0631\u0648\u062D \u0644\u0644\u0637\u0627\u0628\u0648\u0631." : "");
+      c.check("P4-08", "\u0627\u0644\u0645\u0647\u0644\u0629 \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0644\u0644\u0643\u062A\u0627\u0628\u0629 \u0628\u0627\u0644\u0645\u0644\u0644\u064A \u062B\u0627\u0646\u064A\u0629", 2e4, WRITE_TIMEOUT_MS);
     }
   },
   {
     id: "P4-09",
-    title: "\u062B\u063A\u0631\u0629 \u0645\u062D\u062A\u0645\u0644\u0629: \u0644\u0648 \u062D\u062C\u0632 \u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0639\u0644\u0651\u0642\u060C \u0627\u0644\u0632\u0631\u0627\u0631 \u0644\u0627\u0632\u0645 \u064A\u0643\u0645\u0651\u0644 \u0628\u0631\u0642\u0645 \u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0628\u0639\u062F \u0648\u0642\u062A \u0645\u0639\u0642\u0648\u0644 (D5/F6)",
+    title: "\u0644\u0648 \u062D\u062C\u0632 \u0631\u0642\u0645 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0639\u0644\u0651\u0642\u060C \u0628\u064A\u0643\u0645\u0651\u0644 \u0628\u0631\u0642\u0645 \u0627\u062D\u062A\u064A\u0627\u0637\u064A \u0628\u0639\u062F \u0627\u0644\u0645\u0647\u0644\u0629 (D5/F6 \u2014 fix #64)",
     run: async (c) => {
-      let settled = false;
+      let claimed = null;
       const spy = sysInstallFault("invoice_number_settings", () => new Promise(() => {
       }));
-      claimNextInvoiceNumber(Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS, { nextNumber: 7 })).then(() => {
-        settled = true;
+      claimNextInvoiceNumber(Object.assign({}, DEFAULT_INVOICE_NUMBER_SETTINGS, { nextNumber: 7 }), 1500).then((r) => {
+        claimed = r;
       });
-      await sysSleep(6e3);
+      await sysSleep(4e3);
       spy.restore();
-      c.check("P4-09", "\u0627\u0644\u062D\u062C\u0632 \u0631\u062C\u0651\u0639 \u0631\u0642\u0645 \u062E\u0644\u0627\u0644 \u0666 \u062B\u0648\u0627\u0646\u064A\u061F", { settledWithin6s: true }, { settledWithin6s: settled }, settled ? "" : "\u0645\u0641\u064A\u0634 \u0645\u0647\u0644\u0629 \u0639\u0644\u0649 \u062D\u062C\u0632 \u0627\u0644\u0631\u0642\u0645: \xAB\u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629\xBB \u0645\u0645\u0643\u0646 \u062A\u0641\u0636\u0644 \u0645\u0633\u062A\u0646\u064A\u0629.");
+      c.check("P4-09", "[\u0631\u0642\u0645 \u0627\u0644\u062D\u062C\u0632\u060C \u0627\u0644\u0639\u062F\u0651\u0627\u062F \u0627\u0644\u0645\u062D\u0644\u064A] \u0628\u0639\u062F \u0645\u0647\u0644\u0629 \u0642\u0635\u064A\u0631\u0629", [7, 8], claimed ? [claimed.number, claimed.updatedSettings.nextNumber] : null, claimed ? "" : "\u0645\u0641\u064A\u0634 \u0645\u0647\u0644\u0629 \u0639\u0644\u0649 \u062D\u062C\u0632 \u0627\u0644\u0631\u0642\u0645: \xAB\u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629\xBB \u0645\u0645\u0643\u0646 \u062A\u0641\u0636\u0644 \u0645\u0633\u062A\u0646\u064A\u0629.");
+      c.check("P4-09", "\u0627\u0644\u0645\u0647\u0644\u0629 \u0627\u0644\u062D\u0642\u064A\u0642\u064A\u0629 \u0644\u062D\u062C\u0632 \u0627\u0644\u0631\u0642\u0645 \u0628\u0627\u0644\u0645\u0644\u0644\u064A \u062B\u0627\u0646\u064A\u0629", 8e3, CLAIM_TIMEOUT_MS);
     }
   },
   {
@@ -7158,6 +7204,52 @@ const SYS_PART4_CHECKS = [
     }
   },
   {
+    id: "P4-13",
+    title: "\u0627\u0644\u062C\u0647\u0627\u0632 \u0623\u0648\u0641\u0644\u0627\u064A\u0646: \u062E\u0637\u0623 \u0627\u0644\u0634\u0628\u0643\u0629 \u0645\u0627 \u064A\u0637\u0644\u0651\u0639\u0634 \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631\u060C \u0648\u0644\u0645\u0627 \u0627\u0644\u062C\u0647\u0627\u0632 \u0623\u0648\u0646\u0644\u0627\u064A\u0646 \u0646\u0641\u0633 \u0627\u0644\u062E\u0637\u0623 \u0644\u0633\u0647 \u064A\u0637\u0644\u0651\u0639\u0647 (fix #63)",
+    run: async (c) => {
+      if (typeof document === "undefined" || typeof navigator === "undefined" || !document.body || typeof document.body.innerText !== "string") {
+        c.skip("P4-13", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646", "\u064A\u062A\u0634\u063A\u0651\u0644 \u0639\u0644\u0649 \u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644 \u0628\u0633 (\u0645\u062D\u062A\u0627\u062C \u0634\u0627\u0634\u0629 \u0627\u0644\u062A\u0637\u0628\u064A\u0642)");
+        return;
+      }
+      const barText = "\u062A\u0639\u0630\u0631 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u2014 changes_col";
+      const barShown = () => document.body.innerText.includes(barText);
+      const setOnline = (v) => Object.defineProperty(navigator, "onLine", { configurable: true, get: () => v });
+      const restoreOnline = () => {
+        try {
+          delete navigator.onLine;
+        } catch (e) {
+        }
+      };
+      const failNetwork = async () => {
+        const fault = sysInstallFault("changes_col", () => Promise.reject(new TypeError("Failed to fetch")));
+        try {
+          await changesStore.loadAll();
+        } finally {
+          fault.restore();
+        }
+        await sysSleep(400);
+      };
+      if (barShown()) {
+        c.skip("P4-13", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646", "\u0641\u064A \u0634\u0631\u064A\u0637 \u062E\u0637\u0623 \u0638\u0627\u0647\u0631 \u062F\u0644\u0648\u0642\u062A\u064A \u0645\u0646 \u062D\u0627\u062C\u0629 \u062A\u0627\u0646\u064A\u0629 \u2014 \u0627\u0633\u062A\u0646\u0649 10 \u062B\u0648\u0627\u0646\u064A \u0648\u0634\u063A\u0651\u0644 \u0627\u0644\u062C\u0632\u0621 \u062A\u0627\u0646\u064A");
+        return;
+      }
+      let offlineShown;
+      let onlineShown;
+      try {
+        setOnline(false);
+        await failNetwork();
+        offlineShown = barShown();
+        setOnline(true);
+        await failNetwork();
+        onlineShown = barShown();
+      } finally {
+        restoreOnline();
+      }
+      c.check("P4-13a", "\u0627\u0644\u062C\u0647\u0627\u0632 \u0623\u0648\u0641\u0644\u0627\u064A\u0646 + \u062E\u0637\u0623 \u0634\u0628\u0643\u0629: \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0638\u0627\u0647\u0631\u061F (\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u0644\u0623)", false, offlineShown);
+      c.check("P4-13b", "\u0627\u0644\u062C\u0647\u0627\u0632 \u0623\u0648\u0646\u0644\u0627\u064A\u0646 + \u0646\u0641\u0633 \u062E\u0637\u0623 \u0627\u0644\u0634\u0628\u0643\u0629: \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0638\u0627\u0647\u0631\u061F (\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u0623\u064A\u0648\u0647 \u2014 \u0627\u0644\u0641\u0644\u062A\u0631 \u0645\u0627 \u0628\u064A\u062E\u0641\u064A\u0634 \u0643\u0644 \u062D\u0627\u062C\u0629)", true, onlineShown);
+    }
+  },
+  {
     id: "P4-M1",
     title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646",
     run: async (c) => {
@@ -7167,6 +7259,7 @@ const SYS_PART4_CHECKS = [
       c.skip("P4-M1d", "\u0628\u064A\u0639 \u062C\u062F\u064A\u062F \u0642\u0628\u0644 \u0642\u0641\u0644 \u0646\u0627\u0641\u0630\u0629 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB (E14)", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0628\u062F\u0623 \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629 \u0648\u0627\u0646\u062A \u0644\u0633\u0647 \u0645\u0627 \u0642\u0641\u0644\u062A\u0634 \u0645\u0639\u0627\u064A\u0646\u0629 \u0627\u0644\u0644\u064A \u0641\u0627\u062A\u062A");
       c.skip("P4-M1e", "\u0628\u0627\u0646\u0631 \u{1F4F4} \u0648\u0627\u0644\u0639\u062F\u0651\u0627\u062F (F1)", "\u270B \u064A\u062F\u0648\u064A: \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u062A\u064A\u0646\u060C \u0644\u0627\u0632\u0645 \u0627\u0644\u0628\u0627\u0646\u0631 \u064A\u0638\u0647\u0631 \xAB\u0662 \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631\xBB \u0648\u0628\u0639\u062F \u0631\u062C\u0648\u0639 \u0627\u0644\u0646\u062A \u064A\u062E\u062A\u0641\u064A");
       c.skip("P4-M1g", "\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u0627\u0644\u0623\u062D\u0645\u0631 \u0644\u0645\u0627 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634 \u0641\u064A \u0623\u064A \u0645\u0643\u0627\u0646 (F8)", "\u270B \u064A\u062F\u0648\u064A (\u0635\u0639\u0628 \u062A\u0639\u0645\u0644\u0647): \u0648\u0642\u0641 \u0627\u0644\u0646\u062A \u0648\u0627\u0645\u062A\u0644\u0651\u064A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u0644\u0622\u062E\u0631\u0647\u0627\u060C \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u0629: \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 \u062A\u062D\u0630\u064A\u0631 \u0623\u062D\u0645\u0631 \u0641\u0648\u0642 \u0634\u0627\u0634\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0641\u064A\u0647 \u0632\u0631\u0627\u0631 \xAB\u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629\xBB \u0648\u0635\u0648\u062A \u062A\u0646\u0628\u064A\u0647 \u0643\u0644 \u062B\u0648\u0627\u0646\u064A\u060C \u0648\u0627\u0644\u0633\u0644\u0629 \u062A\u0641\u0636\u0644 \u0632\u064A \u0645\u0627 \u0647\u064A\u060C \u0648\u0645\u0641\u064A\u0634 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB. \u0648\u0628\u0639\u062F \u0645\u0627 \u0627\u0644\u0646\u062A \u0623\u0648 \u0627\u0644\u0645\u0633\u0627\u062D\u0629 \u062A\u0631\u062C\u0639 \u0648\u062A\u062F\u0648\u0633 \xAB\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0628\u064A\u0639\xBB \u062A\u0627\u0646\u064A: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062A\u062D\u0641\u0638 \u0648\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u064A\u062E\u062A\u0641\u064A");
+      c.skip("P4-M1h", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0628\u0634\u0643\u0644 \u062D\u0642\u064A\u0642\u064A (fix #63)", "\u270B \u064A\u062F\u0648\u064A: \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646 \u0648\u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0648\u0633\u064A\u0628\u0647 \u062F\u0642\u064A\u0642\u062A\u064A\u0646: \u0645\u0627 \u064A\u0638\u0647\u0631\u0634 \u0634\u0631\u064A\u0637 \xAB\u062A\u0639\u0630\u0631 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A\xBB. \u0628\u0639\u062F\u0647\u0627 \u0634\u063A\u0651\u0644 \u0627\u0644\u0646\u062A: \u0623\u064A \u062E\u0637\u0623 \u062D\u0642\u064A\u0642\u064A \u0644\u0633\u0647 \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 (\u0645\u062B\u0644\u064B\u0627 \u0645\u0645\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A)");
       c.skip("P4-M1f", "\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0648\u0644 \u0645\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0625\u0646\u062A\u0631\u0646\u062A", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0645\u0633\u062D \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0648\u0642\u0639\u060C \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0627\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642: \u0647\u0644 \u0628\u064A\u0641\u062A\u062D\u061F (\u0627\u0644\u0640 CDN \u0645\u0634 \u0628\u064A\u062A\u062E\u0632\u0646 \u0641\u064A \u0627\u0644\u0640 service worker)");
     }
   }
