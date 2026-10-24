@@ -521,7 +521,7 @@ function queueOfflineOp(collectionName, type, payload, opts) {
   const id = type === "remove" ? payload : payload.id;
   const filtered = q.filter((op) => !(op.collectionName === collectionName && (op.type === "remove" ? op.payload : op.payload.id) === id));
   const entry = { qid: nextOfflineQueueId(), collectionName, type, payload, queuedAt: Date.now() };
-  if (opts && opts.createOnly && type === "upsert") entry.createOnly = true;
+  if (opts && opts.createOnly === true && type === "upsert") entry.createOnly = true;
   filtered.push(entry);
   if (!setOfflineQueueRaw(filtered)) return false;
   notifyQueueChange();
@@ -530,8 +530,8 @@ function queueOfflineOp(collectionName, type, payload, opts) {
 function makeCollectionStore(collectionName) {
   const base = `${FIRESTORE_BASE}/${collectionName}`;
   async function attempt(type, payload, timeoutMs = WRITE_TIMEOUT_MS, opts) {
-    const createOnly = !!(opts && opts.createOnly) && type === "upsert";
     try {
+      const createOnly = type === "upsert" && !!opts && opts.createOnly === true;
       return await withDeadline(timeoutMs, async (signal) => {
         const send = (token) => type === "remove" ? fetch(`${base}/${payload}`, { method: "DELETE", headers: { Authorization: `Bearer ${token}` }, signal }) : fetch(`${base}/${payload.id}${createOnly ? "?currentDocument.exists=false" : ""}`, {
           method: "PATCH",
@@ -544,15 +544,13 @@ function makeCollectionStore(collectionName) {
           invalidateIdToken();
           res = await send(await ensureAuth());
         }
-        if (!res.ok && createOnly && res.status === 409) {
-          let already = false;
-          try {
-            const d = await (typeof res.clone === "function" ? res.clone() : res).json();
-            const e = Array.isArray(d) ? d[0]?.error : d?.error;
-            already = !!e && e.status === "ALREADY_EXISTS";
-          } catch {
+        if (!res.ok && createOnly && (res.status === 409 || res.status === 400 || res.status === 403 || res.status === 412)) {
+          const there = await fetch(`${base}/${payload.id}`, { headers: { Authorization: `Bearer ${await ensureAuth()}` }, signal });
+          if (there.ok) return "ok";
+          if (res.status === 409) {
+            notifyStoreError(collectionName, await readErrorDetail(res));
+            return "retry";
           }
-          if (already) return "ok";
         }
         if (!res.ok) {
           notifyStoreError(collectionName, await readErrorDetail(res));
@@ -1415,7 +1413,7 @@ async function syncOfflineQueue() {
         finishedIds.add(op.qid);
         continue;
       }
-      const result = await store._attempt(op.type, op.payload, SYNC_REPLAY_TIMEOUT_MS, { createOnly: !!op.createOnly });
+      const result = await store._attempt(op.type, op.payload, SYNC_REPLAY_TIMEOUT_MS, { createOnly: op.createOnly === true });
       if (result !== "retry") finishedIds.add(op.qid);
     }
   } finally {
@@ -7247,6 +7245,18 @@ const SYS_PART4_CHECKS = [
       }
       c.check("P4-13a", "\u0627\u0644\u062C\u0647\u0627\u0632 \u0623\u0648\u0641\u0644\u0627\u064A\u0646 + \u062E\u0637\u0623 \u0634\u0628\u0643\u0629: \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0638\u0627\u0647\u0631\u061F (\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u0644\u0623)", false, offlineShown);
       c.check("P4-13b", "\u0627\u0644\u062C\u0647\u0627\u0632 \u0623\u0648\u0646\u0644\u0627\u064A\u0646 + \u0646\u0641\u0633 \u062E\u0637\u0623 \u0627\u0644\u0634\u0628\u0643\u0629: \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0638\u0627\u0647\u0631\u061F (\u0627\u0644\u0645\u0641\u0631\u0648\u0636 \u0623\u064A\u0648\u0647 \u2014 \u0627\u0644\u0641\u0644\u062A\u0631 \u0645\u0627 \u0628\u064A\u062E\u0641\u064A\u0634 \u0643\u0644 \u062D\u0627\u062C\u0629)", true, onlineShown);
+    }
+  },
+  {
+    id: "P4-14",
+    title: "\u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629 \u0627\u062A\u0639\u0627\u062F \u0625\u0631\u0633\u0627\u0644\u0647\u0627 \u0648\u0647\u064A \u0645\u0648\u062C\u0648\u062F\u0629 \u0641\u0639\u0644\u064B\u0627 \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631: \u0628\u062A\u062A\u0639\u062A\u0628\u0631 \u0646\u062C\u062D\u062A \u0648\u0645\u0627\u0628\u062A\u0643\u062A\u0628\u0634 \u0641\u0648\u0642 \u0627\u0644\u0645\u0648\u062C\u0648\u062F\u0629 (fix #65)",
+    run: async (c) => {
+      const doc = c.sale("exists");
+      c.leftover(`sales_col/${doc.id}`, "\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062C\u0631\u064A\u0628\u064A\u0629");
+      const first = await salesStore._attempt("upsert", doc);
+      const replay = await salesStore._attempt("upsert", Object.assign({}, doc, { total: 999, items: doc.items }), 2e4, { createOnly: true });
+      const g = await c.getDoc("sales_col", doc.id);
+      c.check("P4-14", "[\u0627\u0644\u0643\u062A\u0627\u0628\u0629 \u0627\u0644\u0623\u0648\u0644\u0649\u060C \u0625\u0639\u0627\u062F\u0629 \u0627\u0644\u0625\u0631\u0633\u0627\u0644 \u0628\u0634\u0631\u0637 \xAB\u0645\u0634 \u0645\u0648\u062C\u0648\u062F\u0629\xBB\u060C \u0625\u062C\u0645\u0627\u0644\u064A \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0639\u0644\u0649 \u0627\u0644\u0633\u064A\u0631\u0641\u0631]", ["ok", "ok", 7], [first, replay, g.data ? g.data.total : null]);
     }
   },
   {
