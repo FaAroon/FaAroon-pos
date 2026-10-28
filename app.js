@@ -104,6 +104,55 @@ function classifyErrorType(detail) {
   if (status === "400" && /requires an index/i.test(rest)) return "2";
   return "9";
 }
+let networkReachable = true;
+let networkProbeInFlight = null;
+function isNetworkReachable() {
+  return networkReachable;
+}
+function setNetworkReachable(value) {
+  const v = value !== false;
+  if (networkReachable === v) return;
+  networkReachable = v;
+  try {
+    window.dispatchEvent(new CustomEvent("network-reachability", { detail: v }));
+  } catch {
+  }
+}
+function probeNetworkOnce(timeoutMs) {
+  const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  return fetch("https://firestore.googleapis.com/?probe=" + Date.now(), { mode: "no-cors", cache: "no-store", signal: ctrl ? ctrl.signal : void 0 }).then(() => true, () => false).then((ok) => {
+    if (timer) clearTimeout(timer);
+    return ok;
+  });
+}
+function probeNetwork(timeoutMs = 6e3, retryDelayMs = 1500) {
+  if (networkProbeInFlight) return networkProbeInFlight;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    setNetworkReachable(false);
+    return Promise.resolve(false);
+  }
+  networkProbeInFlight = probeNetworkOnce(timeoutMs).then((ok) => ok ? true : new Promise((r) => setTimeout(r, retryDelayMs)).then(() => probeNetworkOnce(timeoutMs))).then((ok) => {
+    setNetworkReachable(ok);
+    return ok;
+  }).finally(() => {
+    networkProbeInFlight = null;
+  });
+  return networkProbeInFlight;
+}
+function offlineStatusText(online, pending, showCachedNote) {
+  const n = Number(pending) || 0;
+  const changes = n === 1 ? "\u062A\u0639\u062F\u064A\u0644" : "\u062A\u0639\u062F\u064A\u0644\u0627\u062A";
+  if (!online) {
+    let t = "\u{1F4F4} \u0623\u0648\u0641\u0644\u0627\u064A\u0646";
+    if (n > 0) t += ` \u2014 ${n} ${changes} \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631`;
+    if (showCachedNote) t += " \u2014 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0622\u062E\u0631 \u0646\u0633\u062E\u0629 \u0645\u062D\u0641\u0648\u0638\u0629";
+    return t;
+  }
+  if (n > 0) return `\u{1F504} \u062C\u0627\u0631\u064A \u0645\u0632\u0627\u0645\u0646\u0629 ${n} ${changes}\u2026`;
+  if (showCachedNote) return "\u26A0\uFE0F \u0627\u0644\u0633\u064A\u0631\u0641\u0631 \u0645\u0634 \u0628\u064A\u0631\u062F \u2014 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0622\u062E\u0631 \u0646\u0633\u062E\u0629 \u0645\u062D\u0641\u0648\u0638\u0629";
+  return null;
+}
 function shouldShowStoreError(code, online) {
   if (online === false && /-1$/.test(String(code || ""))) return false;
   return true;
@@ -2074,6 +2123,46 @@ function tierBase(v) {
   const rows = tierRows(v);
   return rows[0] && rows[0].price !== void 0 && rows[0].price !== null ? rows[0].price : 0;
 }
+function OfflineStatusStrip({ showCachedNote }) {
+  const [browserOnline, setBrowserOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine !== false);
+  const [reachable, setReachable] = useState(() => isNetworkReachable());
+  const [pending, setPending] = useState(() => getOfflineQueue().length);
+  useEffect(() => {
+    const onQueue = (e) => setPending(typeof e.detail === "number" ? e.detail : getOfflineQueue().length);
+    const goOnline = () => {
+      setBrowserOnline(true);
+      probeNetwork();
+    };
+    const goOffline = () => setBrowserOnline(false);
+    const onReach = (e) => setReachable(e.detail !== false);
+    const onStoreError = (e) => {
+      if (/-1$/.test(String(e.detail && e.detail.code || ""))) probeNetwork();
+    };
+    const beat = () => {
+      if (typeof document === "undefined" || document.visibilityState !== "hidden") probeNetwork();
+    };
+    window.addEventListener("offline-queue-change", onQueue);
+    window.addEventListener("online", goOnline);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("network-reachability", onReach);
+    window.addEventListener("store-error", onStoreError);
+    document.addEventListener("visibilitychange", beat);
+    const timer = setInterval(beat, 15e3);
+    beat();
+    return () => {
+      window.removeEventListener("offline-queue-change", onQueue);
+      window.removeEventListener("online", goOnline);
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("network-reachability", onReach);
+      window.removeEventListener("store-error", onStoreError);
+      document.removeEventListener("visibilitychange", beat);
+      clearInterval(timer);
+    };
+  }, []);
+  const text = offlineStatusText(browserOnline && reachable, pending, !!showCachedNote);
+  if (!text) return null;
+  return /* @__PURE__ */ React.createElement("div", { "data-offline-strip": "1", className: "mx-4 mt-3 rounded-2xl border border-amber-400/60 bg-amber-500/15 px-3 py-2 text-center text-[13px] font-bold leading-relaxed text-amber-200", role: "status" }, text);
+}
 function TextField({ label, icon: Icon2, ...props }) {
   return /* @__PURE__ */ React.createElement("label", { className: "block mb-4 text-right" }, /* @__PURE__ */ React.createElement("span", { className: "block mb-1.5 text-sm font-medium text-[#94A3B8]" }, label), /* @__PURE__ */ React.createElement("div", { className: "relative" }, /* @__PURE__ */ React.createElement("input", { ...props, className: "field-input w-full rounded-xl px-4 py-2.5 pr-10 text-[15px] transition-colors" }), Icon2 && /* @__PURE__ */ React.createElement(Icon2, { size: 18, className: "absolute top-1/2 -translate-y-1/2 right-3 text-[#64748B]" })));
 }
@@ -3419,7 +3508,7 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
     },
     /* @__PURE__ */ React.createElement(Icon, { name: "Printer", size: 15 }),
     " \u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629"
-  ), /* @__PURE__ */ React.createElement("button", { onClick: () => setUnsavedSale(null), className: "rounded-lg px-3 py-2 font-bold text-xs border border-rose-400/50 text-rose-200" }, "\u0625\u062E\u0641\u0627\u0621")))), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 py-2 fade-up pb-6 lg:grid lg:grid-cols-[14rem_28rem_14rem] lg:justify-center lg:gap-6 lg:items-start" }, /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex lg:flex-col lg:gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewInvoicePicker(true), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "Plus", size: 15 }), " \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"), /* @__PURE__ */ React.createElement("button", { onClick: () => setView("returns"), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold text-rose-400" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 15 }), " \u0645\u0631\u062A\u062C\u0639")), /* @__PURE__ */ React.createElement("div", { className: "lg:w-full" }, usingCachedProducts && /* @__PURE__ */ React.createElement("div", { className: "bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 mb-3 text-xs text-amber-300 font-bold text-center" }, "\u{1F4F4} \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0646\u062A \u2014 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u062F\u064A \u0622\u062E\u0631 \u0646\u0633\u062E\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u0627\u0644\u0641\u0648\u0646"), productsLoading && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement(SkeletonRows, { count: 5, height: 60 })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 overflow-x-auto mb-4 pb-1" }, invoices.map((inv) => /* @__PURE__ */ React.createElement("div", { key: inv.id, className: `shrink-0 rounded-xl flex items-center ${activeId === inv.id ? "btn-sky" : "btn-ghost"}` }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("button", { onClick: () => setUnsavedSale(null), className: "rounded-lg px-3 py-2 font-bold text-xs border border-rose-400/50 text-rose-200" }, "\u0625\u062E\u0641\u0627\u0621")))), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 py-2 fade-up pb-6 lg:grid lg:grid-cols-[14rem_28rem_14rem] lg:justify-center lg:gap-6 lg:items-start" }, /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex lg:flex-col lg:gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewInvoicePicker(true), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "Plus", size: 15 }), " \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"), /* @__PURE__ */ React.createElement("button", { onClick: () => setView("returns"), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold text-rose-400" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 15 }), " \u0645\u0631\u062A\u062C\u0639")), /* @__PURE__ */ React.createElement("div", { className: "lg:w-full" }, productsLoading && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement(SkeletonRows, { count: 5, height: 60 })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 overflow-x-auto mb-4 pb-1" }, invoices.map((inv) => /* @__PURE__ */ React.createElement("div", { key: inv.id, className: `shrink-0 rounded-xl flex items-center ${activeId === inv.id ? "btn-sky" : "btn-ghost"}` }, /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => {
@@ -3924,7 +4013,7 @@ function PricesScreen({ user, products, setProducts, productsLoading, changedTod
     setChangedToday([]);
   };
   const canSeeReportButton = canEditPrices || canManageProducts;
-  return /* @__PURE__ */ React.createElement("div", { className: "shop-root" }, /* @__PURE__ */ React.createElement(PullToRefresh, { onRefresh: handleRefresh }), /* @__PURE__ */ React.createElement(Header, { user, onLogout: () => setView("logout"), onBack: () => setView("menu"), title: "\u0623\u0633\u0639\u0627\u0631 \u0627\u0644\u0645\u062D\u0644", onNav: setView }), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg mx-auto px-4 py-2 fade-up" }, usingCachedProducts && /* @__PURE__ */ React.createElement("div", { className: "bg-amber-950/40 border border-amber-800 rounded-xl px-3 py-2 mb-3 text-xs text-amber-300 font-bold text-center" }, "\u{1F4F4} \u0645\u0641\u064A\u0634 \u0627\u062A\u0635\u0627\u0644 \u0628\u0627\u0644\u0646\u062A \u2014 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A \u062F\u064A \u0622\u062E\u0631 \u0646\u0633\u062E\u0629 \u0645\u062D\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u0627\u0644\u0641\u0648\u0646"), canSeeReportButton && /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-3" }, /* @__PURE__ */ React.createElement("a", { href: whatsappHref, target: "_blank", rel: "noopener noreferrer", onClick: handleSendReportClick, className: "btn-whatsapp flex-1 rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 no-underline" }, /* @__PURE__ */ React.createElement(Icon, { name: "MessageCircle", size: 18 }), " \u0625\u0631\u0633\u0627\u0644 \u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0644\u0644\u0648\u0627\u062A\u0633\u0627\u0628", /* @__PURE__ */ React.createElement("span", { className: "bg-black/25 px-2 py-0.5 rounded-full text-xs" }, changedToday.length)), changedToday.length > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setShowManualReset(true), title: "\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u0639\u062F\u0627\u062F", className: "icon-btn rounded-xl px-3" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 18 }))), toast && /* @__PURE__ */ React.createElement("div", { className: "toast-in text-xs text-center text-[#CBD5E1] bg-black/30 border border-white/10 rounded-xl px-3 py-2 mb-3" }, toast), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-3" }, /* @__PURE__ */ React.createElement("div", { className: "relative flex-1" }, /* @__PURE__ */ React.createElement("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "\u0627\u0628\u062D\u062B \u0639\u0646 \u0645\u0646\u062A\u062C... (\u0639\u0631\u0628\u064A \u0623\u0648 English)", className: "field-input w-full rounded-xl px-4 py-2.5 pr-10 text-[15px]" }), /* @__PURE__ */ React.createElement(Icon, { name: "Search", size: 18, className: "absolute top-1/2 -translate-y-1/2 right-3 text-[#64748B]" })), /* @__PURE__ */ React.createElement("button", { onClick: () => setScannerTarget({ mode: "lookup" }), title: "\u0627\u0645\u0633\u062D \u0627\u0644\u0628\u0627\u0631\u0643\u0648\u062F", className: "icon-btn rounded-xl px-3" }, /* @__PURE__ */ React.createElement(Icon, { name: "ScanLine", size: 18 }))), isAdmin && legacyImageProducts.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "panel rounded-xl p-3 mb-3 border border-amber-500/30 bg-amber-500/5" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-amber-300 font-bold mb-1.5" }, "\u062A\u062D\u0633\u064A\u0646 \u0627\u0644\u0623\u062F\u0627\u0621 \u0645\u062A\u0627\u062D"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#CBD5E1] mb-2" }, "\u0641\u064A\u0647 ", legacyImageProducts.length, " \u0645\u0646\u062A\u062C \u0644\u0633\u0647 \u0635\u0648\u0631\u0647\u0645 \u0645\u062A\u062E\u0632\u0646\u0629 \u0628\u0627\u0644\u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u0642\u062F\u064A\u0645\u0629 (\u0628\u062A\u062E\u0644\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u064A\u0641\u062A\u062D \u0623\u0628\u0637\u0623). \u062A\u0631\u062D\u064A\u0644\u0647\u0645 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 \u0647\u064A\u062E\u0644\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u064A\u0641\u062A\u062D \u0623\u0633\u0631\u0639 \u0628\u0643\u062A\u064A\u0631 \u0645\u0646 \u0628\u0639\u062F\u0647\u0627."), migrating ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-amber-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 14, className: "animate-spin" }), " \u0628\u064A\u062A\u0631\u062D\u0651\u0644... ", migrateProgress) : /* @__PURE__ */ React.createElement("button", { onClick: migrateImages, className: "btn-emerald rounded-lg px-3 py-1.5 text-xs font-bold" }, "\u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0635\u0648\u0631 \u062F\u0644\u0648\u0642\u062A\u064A")), (categories.length > 0 || isAdmin) && /* @__PURE__ */ React.createElement("div", { className: "mb-3 flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Icon, { name: "Tag", size: 16, className: "text-[#64748B] shrink-0" }), /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "shop-root" }, /* @__PURE__ */ React.createElement(PullToRefresh, { onRefresh: handleRefresh }), /* @__PURE__ */ React.createElement(Header, { user, onLogout: () => setView("logout"), onBack: () => setView("menu"), title: "\u0623\u0633\u0639\u0627\u0631 \u0627\u0644\u0645\u062D\u0644", onNav: setView }), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg mx-auto px-4 py-2 fade-up" }, canSeeReportButton && /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-3" }, /* @__PURE__ */ React.createElement("a", { href: whatsappHref, target: "_blank", rel: "noopener noreferrer", onClick: handleSendReportClick, className: "btn-whatsapp flex-1 rounded-xl py-2.5 font-bold flex items-center justify-center gap-2 no-underline" }, /* @__PURE__ */ React.createElement(Icon, { name: "MessageCircle", size: 18 }), " \u0625\u0631\u0633\u0627\u0644 \u062A\u0642\u0631\u064A\u0631 \u0627\u0644\u062A\u0639\u062F\u064A\u0644\u0627\u062A \u0644\u0644\u0648\u0627\u062A\u0633\u0627\u0628", /* @__PURE__ */ React.createElement("span", { className: "bg-black/25 px-2 py-0.5 rounded-full text-xs" }, changedToday.length)), changedToday.length > 0 && /* @__PURE__ */ React.createElement("button", { onClick: () => setShowManualReset(true), title: "\u062A\u0635\u0641\u064A\u0631 \u0627\u0644\u0639\u062F\u0627\u062F", className: "icon-btn rounded-xl px-3" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 18 }))), toast && /* @__PURE__ */ React.createElement("div", { className: "toast-in text-xs text-center text-[#CBD5E1] bg-black/30 border border-white/10 rounded-xl px-3 py-2 mb-3" }, toast), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 mb-3" }, /* @__PURE__ */ React.createElement("div", { className: "relative flex-1" }, /* @__PURE__ */ React.createElement("input", { value: query, onChange: (e) => setQuery(e.target.value), placeholder: "\u0627\u0628\u062D\u062B \u0639\u0646 \u0645\u0646\u062A\u062C... (\u0639\u0631\u0628\u064A \u0623\u0648 English)", className: "field-input w-full rounded-xl px-4 py-2.5 pr-10 text-[15px]" }), /* @__PURE__ */ React.createElement(Icon, { name: "Search", size: 18, className: "absolute top-1/2 -translate-y-1/2 right-3 text-[#64748B]" })), /* @__PURE__ */ React.createElement("button", { onClick: () => setScannerTarget({ mode: "lookup" }), title: "\u0627\u0645\u0633\u062D \u0627\u0644\u0628\u0627\u0631\u0643\u0648\u062F", className: "icon-btn rounded-xl px-3" }, /* @__PURE__ */ React.createElement(Icon, { name: "ScanLine", size: 18 }))), isAdmin && legacyImageProducts.length > 0 && /* @__PURE__ */ React.createElement("div", { className: "panel rounded-xl p-3 mb-3 border border-amber-500/30 bg-amber-500/5" }, /* @__PURE__ */ React.createElement("p", { className: "text-xs text-amber-300 font-bold mb-1.5" }, "\u062A\u062D\u0633\u064A\u0646 \u0627\u0644\u0623\u062F\u0627\u0621 \u0645\u062A\u0627\u062D"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#CBD5E1] mb-2" }, "\u0641\u064A\u0647 ", legacyImageProducts.length, " \u0645\u0646\u062A\u062C \u0644\u0633\u0647 \u0635\u0648\u0631\u0647\u0645 \u0645\u062A\u062E\u0632\u0646\u0629 \u0628\u0627\u0644\u0637\u0631\u064A\u0642\u0629 \u0627\u0644\u0642\u062F\u064A\u0645\u0629 (\u0628\u062A\u062E\u0644\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u064A\u0641\u062A\u062D \u0623\u0628\u0637\u0623). \u062A\u0631\u062D\u064A\u0644\u0647\u0645 \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629 \u0628\u0633 \u0647\u064A\u062E\u0644\u064A \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u064A\u0641\u062A\u062D \u0623\u0633\u0631\u0639 \u0628\u0643\u062A\u064A\u0631 \u0645\u0646 \u0628\u0639\u062F\u0647\u0627."), migrating ? /* @__PURE__ */ React.createElement("p", { className: "text-xs text-amber-300 flex items-center gap-1.5" }, /* @__PURE__ */ React.createElement(Icon, { name: "Loader2", size: 14, className: "animate-spin" }), " \u0628\u064A\u062A\u0631\u062D\u0651\u0644... ", migrateProgress) : /* @__PURE__ */ React.createElement("button", { onClick: migrateImages, className: "btn-emerald rounded-lg px-3 py-1.5 text-xs font-bold" }, "\u062A\u0631\u062D\u064A\u0644 \u0627\u0644\u0635\u0648\u0631 \u062F\u0644\u0648\u0642\u062A\u064A")), (categories.length > 0 || isAdmin) && /* @__PURE__ */ React.createElement("div", { className: "mb-3 flex items-center gap-2" }, /* @__PURE__ */ React.createElement(Icon, { name: "Tag", size: 16, className: "text-[#64748B] shrink-0" }), /* @__PURE__ */ React.createElement("div", { className: "flex-1" }, /* @__PURE__ */ React.createElement(
     CategoryCombobox,
     {
       categories,
@@ -5249,6 +5338,10 @@ function App() {
     };
     window.addEventListener("offline-queue-change", onQueueChange);
     window.addEventListener("online", onOnline);
+    const onReach = (e) => {
+      if (e.detail) onOnline();
+    };
+    window.addEventListener("network-reachability", onReach);
     const interval = setInterval(() => {
       syncOfflineQueue();
       syncAggregateQueue();
@@ -5256,6 +5349,7 @@ function App() {
     return () => {
       window.removeEventListener("offline-queue-change", onQueueChange);
       window.removeEventListener("online", onOnline);
+      window.removeEventListener("network-reachability", onReach);
       clearInterval(interval);
     };
   }, [currentUser]);
@@ -5653,7 +5747,7 @@ function App() {
   if (booting) {
     return /* @__PURE__ */ React.createElement("div", { className: "shop-root flex flex-col items-center justify-center gap-4", style: { minHeight: "100vh" } }, /* @__PURE__ */ React.createElement("img", { src: "./icon-192.png", alt: "", className: "w-20 h-20 rounded-2xl shadow-lg splash-logo-pulse" }), /* @__PURE__ */ React.createElement("h1", { className: "text-2xl font-bold text-white tracking-wide splash-fade-in" }, "FaAroon"), /* @__PURE__ */ React.createElement("div", { className: "splash-bar-track" }, /* @__PURE__ */ React.createElement("div", { className: "splash-bar-fill" })), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-[#64748B] splash-fade-in" }, "...\u062C\u0627\u0631\u064D \u0627\u0644\u062A\u062D\u0645\u064A\u0644"));
   }
-  return /* @__PURE__ */ React.createElement("div", { className: "shop-root" }, currentUser && /* @__PURE__ */ React.createElement(NotificationBell, { notifications, onMarkRead: markNotificationRead, onMarkAllRead: markAllNotificationsRead }), pendingSyncCount > 0 && /* @__PURE__ */ React.createElement("div", { className: "fixed top-3 inset-x-3 z-[65] bg-amber-950/90 border border-amber-700 rounded-2xl p-3 modal-pop max-w-md mx-auto text-center" }, /* @__PURE__ */ React.createElement("p", { className: "text-amber-300 text-xs font-bold flex items-center justify-center gap-1.5" }, "\u{1F4F4} \u0639\u0646\u062F\u0643 ", pendingSyncCount, " ", pendingSyncCount === 1 ? "\u062A\u0639\u062F\u064A\u0644" : "\u062A\u0639\u062F\u064A\u0644\u0627\u062A", " \u0645\u062D\u0641\u0648\u0638\u0629 \u0639\u0644\u0649 \u062C\u0647\u0627\u0632\u0643\u060C \u0647\u062A\u062A\u0632\u0627\u0645\u0646 \u0623\u0648\u0644 \u0645\u0627 \u0627\u0644\u0646\u062A \u064A\u0631\u062C\u0639")), syncError && /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { className: "shop-root" }, currentUser && /* @__PURE__ */ React.createElement(NotificationBell, { notifications, onMarkRead: markNotificationRead, onMarkAllRead: markAllNotificationsRead }), currentUser && /* @__PURE__ */ React.createElement(OfflineStatusStrip, { showCachedNote: usingCachedProducts && (screen === "cashier" || screen === "prices") }), syncError && /* @__PURE__ */ React.createElement(
     "div",
     {
       onClick: () => {
@@ -7260,6 +7354,49 @@ const SYS_PART4_CHECKS = [
     }
   },
   {
+    id: "P4-15",
+    title: "\u0634\u0631\u064A\u0637 \u0627\u0644\u062D\u0627\u0644\u0629 \u0627\u0644\u0645\u0648\u062D\u0651\u062F: \u0628\u064A\u0638\u0647\u0631 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646\u060C \u062C\u0648\u0647 \u0627\u0644\u0635\u0641\u062D\u0629 (\u0645\u0634 \u062B\u0627\u0628\u062A)\u060C \u0648\u0628\u064A\u062E\u062A\u0641\u064A \u0644\u0645\u0627 \u0627\u0644\u0646\u062A \u064A\u0631\u062C\u0639 (fix #66)",
+    run: async (c) => {
+      if (typeof document === "undefined" || typeof navigator === "undefined" || !document.body || typeof document.querySelector !== "function") {
+        c.skip("P4-15", "\u0634\u0631\u064A\u0637 \u0627\u0644\u062D\u0627\u0644\u0629 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646", "\u064A\u062A\u0634\u063A\u0651\u0644 \u0639\u0644\u0649 \u0627\u0644\u0645\u0648\u0628\u0627\u064A\u0644 \u0628\u0633 (\u0645\u062D\u062A\u0627\u062C \u0634\u0627\u0634\u0629 \u0627\u0644\u062A\u0637\u0628\u064A\u0642)");
+        return;
+      }
+      const setOnline = (v) => Object.defineProperty(navigator, "onLine", { configurable: true, get: () => v });
+      const restoreOnline = () => {
+        try {
+          delete navigator.onLine;
+        } catch (e) {
+        }
+      };
+      const strip = () => document.querySelector("[data-offline-strip]");
+      const info = () => {
+        const el = strip();
+        if (!el) return null;
+        return [getComputedStyle(el).position !== "fixed", el.textContent.includes("\u0623\u0648\u0641\u0644\u0627\u064A\u0646")];
+      };
+      let during = null;
+      let after;
+      try {
+        setOnline(false);
+        window.dispatchEvent(new Event("offline"));
+        await sysSleep(400);
+        during = info();
+        setOnline(true);
+        window.dispatchEvent(new Event("online"));
+        await sysSleep(400);
+        after = strip() ? strip().textContent : null;
+      } finally {
+        restoreOnline();
+      }
+      if (during === null) {
+        c.skip("P4-15", "\u0634\u0631\u064A\u0637 \u0627\u0644\u062D\u0627\u0644\u0629 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0645\u0634 \u0638\u0627\u0647\u0631: \u0627\u0641\u062A\u062D \u0634\u0627\u0634\u0629 \u0628\u0639\u062F \u062A\u0633\u062C\u064A\u0644 \u0627\u0644\u062F\u062E\u0648\u0644 (\u0645\u0634 \u0634\u0627\u0634\u0629 \u0627\u0644\u062F\u062E\u0648\u0644) \u0648\u0634\u063A\u0651\u0644 \u0627\u0644\u062C\u0632\u0621 \u062A\u0627\u0646\u064A");
+        return;
+      }
+      c.check("P4-15", "[\u0627\u0644\u0634\u0631\u064A\u0637 \u0645\u0634 \u062B\u0627\u0628\u062A (\u062C\u0648\u0647 \u0627\u0644\u0635\u0641\u062D\u0629)\u060C \u0641\u064A\u0647 \u0643\u0644\u0645\u0629 \xAB\u0623\u0648\u0641\u0644\u0627\u064A\u0646\xBB] \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646", [true, true], during);
+      c.check("P4-15b", "\u0628\u0639\u062F \u0631\u062C\u0648\u0639 \u0627\u0644\u0646\u062A: \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u062E\u062A\u0641\u0649 \u0623\u0648 \u0628\u0642\u0649 \xAB\u062C\u0627\u0631\u064A \u0645\u0632\u0627\u0645\u0646\u0629\xBB (\u0645\u0634 \xAB\u0623\u0648\u0641\u0644\u0627\u064A\u0646\xBB)", true, after === null || !after.includes("\u0623\u0648\u0641\u0644\u0627\u064A\u0646"));
+    }
+  },
+  {
     id: "P4-M1",
     title: "\u0641\u062D\u0648\u0635\u0627\u062A \u064A\u062F\u0648\u064A\u0629 \u0644\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646",
     run: async (c) => {
@@ -7270,6 +7407,8 @@ const SYS_PART4_CHECKS = [
       c.skip("P4-M1e", "\u0628\u0627\u0646\u0631 \u{1F4F4} \u0648\u0627\u0644\u0639\u062F\u0651\u0627\u062F (F1)", "\u270B \u064A\u062F\u0648\u064A: \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u062A\u064A\u0646\u060C \u0644\u0627\u0632\u0645 \u0627\u0644\u0628\u0627\u0646\u0631 \u064A\u0638\u0647\u0631 \xAB\u0662 \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631\xBB \u0648\u0628\u0639\u062F \u0631\u062C\u0648\u0639 \u0627\u0644\u0646\u062A \u064A\u062E\u062A\u0641\u064A");
       c.skip("P4-M1g", "\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u0627\u0644\u0623\u062D\u0645\u0631 \u0644\u0645\u0627 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u0645\u0627 \u0627\u062A\u062D\u0641\u0638\u062A\u0634 \u0641\u064A \u0623\u064A \u0645\u0643\u0627\u0646 (F8)", "\u270B \u064A\u062F\u0648\u064A (\u0635\u0639\u0628 \u062A\u0639\u0645\u0644\u0647): \u0648\u0642\u0641 \u0627\u0644\u0646\u062A \u0648\u0627\u0645\u062A\u0644\u0651\u064A \u0645\u0633\u0627\u062D\u0629 \u0627\u0644\u062C\u0647\u0627\u0632 \u0644\u0622\u062E\u0631\u0647\u0627\u060C \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u0629: \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 \u062A\u062D\u0630\u064A\u0631 \u0623\u062D\u0645\u0631 \u0641\u0648\u0642 \u0634\u0627\u0634\u0629 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0641\u064A\u0647 \u0632\u0631\u0627\u0631 \xAB\u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629\xBB \u0648\u0635\u0648\u062A \u062A\u0646\u0628\u064A\u0647 \u0643\u0644 \u062B\u0648\u0627\u0646\u064A\u060C \u0648\u0627\u0644\u0633\u0644\u0629 \u062A\u0641\u0636\u0644 \u0632\u064A \u0645\u0627 \u0647\u064A\u060C \u0648\u0645\u0641\u064A\u0634 \xAB\u062A\u0645 \u0627\u0644\u0628\u064A\u0639\xBB. \u0648\u0628\u0639\u062F \u0645\u0627 \u0627\u0644\u0646\u062A \u0623\u0648 \u0627\u0644\u0645\u0633\u0627\u062D\u0629 \u062A\u0631\u062C\u0639 \u0648\u062A\u062F\u0648\u0633 \xAB\u062A\u0623\u0643\u064A\u062F \u0627\u0644\u0628\u064A\u0639\xBB \u062A\u0627\u0646\u064A: \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629 \u062A\u062A\u062D\u0641\u0638 \u0648\u0627\u0644\u062A\u062D\u0630\u064A\u0631 \u064A\u062E\u062A\u0641\u064A");
       c.skip("P4-M1h", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0628\u0634\u0643\u0644 \u062D\u0642\u064A\u0642\u064A (fix #63)", "\u270B \u064A\u062F\u0648\u064A: \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646 \u0648\u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0648\u0633\u064A\u0628\u0647 \u062F\u0642\u064A\u0642\u062A\u064A\u0646: \u0645\u0627 \u064A\u0638\u0647\u0631\u0634 \u0634\u0631\u064A\u0637 \xAB\u062A\u0639\u0630\u0631 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A\xBB. \u0628\u0639\u062F\u0647\u0627 \u0634\u063A\u0651\u0644 \u0627\u0644\u0646\u062A: \u0623\u064A \u062E\u0637\u0623 \u062D\u0642\u064A\u0642\u064A \u0644\u0633\u0647 \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 (\u0645\u062B\u0644\u064B\u0627 \u0645\u0645\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A)");
+      c.skip("P4-M1i", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0645\u0648\u062D\u0651\u062F \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0628\u0634\u0643\u0644 \u062D\u0642\u064A\u0642\u064A (fix #66)", "\u270B \u064A\u062F\u0648\u064A: \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646 \u0648\u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631: \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 \u0634\u0631\u064A\u0637 \u0648\u0627\u062D\u062F \u0628\u0633 (\u0645\u0634 \u0627\u062A\u0646\u064A\u0646) \u062A\u062D\u062A \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0628\u062A\u0627\u0639 \u0627\u0644\u0640Beta \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u064A\u063A\u0637\u064A \u0627\u0644\u0647\u064A\u062F\u0631\u060C \u0641\u064A\u0647 \xAB\u0623\u0648\u0641\u0644\u0627\u064A\u0646\xBB \u0648\u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0622\u062E\u0631 \u0646\u0633\u062E\u0629\u060C \u0648\u0644\u0645\u0627 \u062A\u0646\u0632\u0644 \u0628\u0627\u0644\u0635\u0641\u062D\u0629 \u064A\u0645\u0634\u064A \u0645\u0639\u0627\u0647\u0627. \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u0629: \u064A\u0632\u064A\u062F \xAB\u0661 \u062A\u0639\u062F\u064A\u0644 \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631\xBB. \u0634\u063A\u0651\u0644 \u0627\u0644\u0646\u062A: \xAB\u062C\u0627\u0631\u064A \u0645\u0632\u0627\u0645\u0646\u0629\u2026\xBB \u0648\u0628\u0639\u062F\u0647\u0627 \u064A\u062E\u062A\u0641\u064A");
+      c.skip("P4-M1j", "\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0648\u0641\u0644\u0627\u064A\u0646 + \u0642\u0637\u0639 \u0627\u0644\u0646\u062A \u0648\u0627\u0646\u062A \u062C\u0648\u0647 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 (fix #67)", "\u270B \u064A\u062F\u0648\u064A: (\u0661) \u0627\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0628\u0646\u062A \u0645\u0631\u062A\u064A\u0646 (\u0639\u0634\u0627\u0646 \u064A\u062E\u0632\u0651\u0646 \u0646\u0641\u0633\u0647)\u060C \u0627\u0642\u0641\u0644\u0647 \u062A\u0645\u0627\u0645\u064B\u0627\u060C \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646\u060C \u0627\u0641\u062A\u062D\u0647: \u0644\u0627\u0632\u0645 \u064A\u0641\u062A\u062D \u0648\u064A\u062F\u062E\u0644. (\u0662) \u0648\u0627\u0646\u062A \u062C\u0648\u0647 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0634\u063A\u0651\u0644 \u0627\u0644\u0648\u0627\u064A \u0641\u0627\u064A \u0628\u0633 \u0645\u0646 \u063A\u064A\u0631 \u0646\u062A (\u0623\u0648 \u0627\u0641\u0635\u0644 \u0627\u0644\u0646\u062A \u0645\u0646 \u0627\u0644\u0631\u0627\u0648\u062A\u0631): \u0641\u064A \u0623\u0642\u0644 \u0645\u0646 \u0646\u0635 \u062F\u0642\u064A\u0642\u0629 \u064A\u0638\u0647\u0631 \u0634\u0631\u064A\u0637 \xAB\u0623\u0648\u0641\u0644\u0627\u064A\u0646\xBB. \u0631\u062C\u0651\u0639 \u0627\u0644\u0646\u062A: \xAB\u062C\u0627\u0631\u064A \u0645\u0632\u0627\u0645\u0646\u0629\xBB \u0644\u0648 \u0641\u064A\u0647 \u062D\u0627\u062C\u0629 \u0645\u0633\u062A\u0646\u064A\u0629\u060C \u0648\u0628\u0639\u062F\u0647\u0627 \u064A\u062E\u062A\u0641\u064A");
       c.skip("P4-M1f", "\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0648\u0644 \u0645\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0625\u0646\u062A\u0631\u0646\u062A", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0645\u0633\u062D \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0648\u0642\u0639\u060C \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0627\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642: \u0647\u0644 \u0628\u064A\u0641\u062A\u062D\u061F (\u0627\u0644\u0640 CDN \u0645\u0634 \u0628\u064A\u062A\u062E\u0632\u0646 \u0641\u064A \u0627\u0644\u0640 service worker)");
     }
   }
