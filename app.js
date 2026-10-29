@@ -1867,6 +1867,22 @@ async function seedProductVersions(products) {
     return null;
   }
 }
+const PRODUCTS_SYNC_TIMEOUT_MS = 25e3;
+function withTimeout(promise, ms, fallback = null) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms);
+    Promise.resolve(promise).then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(fallback);
+      }
+    );
+  });
+}
 async function syncProducts(localProducts, localVersions) {
   const remoteVersions = await fetchProductVersions();
   if (!remoteVersions) return null;
@@ -3114,7 +3130,7 @@ function CartThumb({ src }) {
     document.body
   ));
 }
-function CashierScreen({ user, products, productsLoading, sales, setSales, tierSettings, invoiceNumberSettings, setInvoiceNumberSettings, usingCachedProducts, branchSettings, categories, setView }) {
+function CashierScreen({ user, products, productsLoading, productsLoaded, sales, setSales, tierSettings, invoiceNumberSettings, setInvoiceNumberSettings, usingCachedProducts, branchSettings, categories, setView }) {
   const [invoices, setInvoices] = useState(() => loadCashierInvoices()?.invoices || []);
   const [activeId, setActiveId] = useState(() => {
     const saved = loadCashierInvoices();
@@ -3508,7 +3524,7 @@ function CashierScreen({ user, products, productsLoading, sales, setSales, tierS
     },
     /* @__PURE__ */ React.createElement(Icon, { name: "Printer", size: 15 }),
     " \u0627\u0637\u0628\u0639 \u0627\u0644\u0641\u0627\u062A\u0648\u0631\u0629"
-  ), /* @__PURE__ */ React.createElement("button", { onClick: () => setUnsavedSale(null), className: "rounded-lg px-3 py-2 font-bold text-xs border border-rose-400/50 text-rose-200" }, "\u0625\u062E\u0641\u0627\u0621")))), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 py-2 fade-up pb-6 lg:grid lg:grid-cols-[14rem_28rem_14rem] lg:justify-center lg:gap-6 lg:items-start" }, /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex lg:flex-col lg:gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewInvoicePicker(true), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "Plus", size: 15 }), " \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"), /* @__PURE__ */ React.createElement("button", { onClick: () => setView("returns"), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold text-rose-400" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 15 }), " \u0645\u0631\u062A\u062C\u0639")), /* @__PURE__ */ React.createElement("div", { className: "lg:w-full" }, productsLoading && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement(SkeletonRows, { count: 5, height: 60 })), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 overflow-x-auto mb-4 pb-1" }, invoices.map((inv) => /* @__PURE__ */ React.createElement("div", { key: inv.id, className: `shrink-0 rounded-xl flex items-center ${activeId === inv.id ? "btn-sky" : "btn-ghost"}` }, /* @__PURE__ */ React.createElement(
+  ), /* @__PURE__ */ React.createElement("button", { onClick: () => setUnsavedSale(null), className: "rounded-lg px-3 py-2 font-bold text-xs border border-rose-400/50 text-rose-200" }, "\u0625\u062E\u0641\u0627\u0621")))), /* @__PURE__ */ React.createElement("div", { className: "max-w-lg lg:max-w-6xl mx-auto px-4 py-2 fade-up pb-6 lg:grid lg:grid-cols-[14rem_28rem_14rem] lg:justify-center lg:gap-6 lg:items-start" }, /* @__PURE__ */ React.createElement("div", { className: "hidden lg:flex lg:flex-col lg:gap-2" }, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowNewInvoicePicker(true), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold" }, /* @__PURE__ */ React.createElement(Icon, { name: "Plus", size: 15 }), " \u0641\u0627\u062A\u0648\u0631\u0629 \u062C\u062F\u064A\u062F\u0629"), /* @__PURE__ */ React.createElement("button", { onClick: () => setView("returns"), className: "icon-btn rounded-xl px-3 py-2.5 flex items-center justify-center gap-1.5 font-bold text-rose-400" }, /* @__PURE__ */ React.createElement(Icon, { name: "RotateCcw", size: 15 }), " \u0645\u0631\u062A\u062C\u0639")), /* @__PURE__ */ React.createElement("div", { className: "lg:w-full" }, productsLoading && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4" }, /* @__PURE__ */ React.createElement(SkeletonRows, { count: 5, height: 60 })), !productsLoading && !productsLoaded && products.length === 0 && /* @__PURE__ */ React.createElement("div", { className: "mb-4 rounded-2xl border border-amber-400/60 bg-amber-500/15 px-3 py-3 text-center text-[13px] font-bold leading-relaxed text-amber-200", "data-products-not-loaded": "1" }, "\u{1F4E6} \u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A \u0644\u0633\u0647 \u0645\u0627\u062A\u062D\u0645\u0651\u0644\u062A\u0634 \u0639\u0644\u0649 \u0627\u0644\u062C\u0647\u0627\u0632 \u062F\u0647 \u2014 \u0645\u062D\u062A\u0627\u062C \u0646\u062A \u0645\u0631\u0629 \u0648\u0627\u062D\u062F\u0629. \u0647\u062A\u062A\u062D\u0645\u0651\u0644 \u0644\u0648\u062D\u062F\u0647\u0627 \u0623\u0648\u0644 \u0645\u0627 \u0627\u0644\u0646\u062A \u064A\u0631\u062C\u0639"), /* @__PURE__ */ React.createElement("div", { className: "flex gap-2 overflow-x-auto mb-4 pb-1" }, invoices.map((inv) => /* @__PURE__ */ React.createElement("div", { key: inv.id, className: `shrink-0 rounded-xl flex items-center ${activeId === inv.id ? "btn-sky" : "btn-ghost"}` }, /* @__PURE__ */ React.createElement(
     "button",
     {
       onClick: () => {
@@ -3708,7 +3724,7 @@ function makeEmptyNewProduct(tiers) {
     priceRows: Object.fromEntries(tiers.map((t) => [t.id, [makeEmptyRow()]]))
   };
 }
-function PricesScreen({ user, products, setProducts, productsLoading, changedToday, setChangedToday, categories, setCategories, tierSettings, usingCachedProducts, setUsingCachedProducts, branchSettings, setView }) {
+function PricesScreen({ user, products, setProducts, onProductsSynced, productsLoading, changedToday, setChangedToday, categories, setCategories, tierSettings, usingCachedProducts, setUsingCachedProducts, branchSettings, setView }) {
   const canEditPrices = userIsAdmin(user) || !!user.permissions?.editPrices;
   const canManageProducts = userIsAdmin(user) || !!user.permissions?.manageProducts;
   const canDeleteProducts = userIsAdmin(user) || !!user.permissions?.deleteProducts;
@@ -3843,9 +3859,13 @@ function PricesScreen({ user, products, setProducts, productsLoading, changedTod
     const localVersions = cached?.versions || {};
     const result = await syncProducts(products, localVersions);
     if (result) {
-      setProducts(result.products);
-      setUsingCachedProducts(false);
-      idbSet("products_cache", result);
+      if (onProductsSynced) {
+        onProductsSynced(result);
+      } else {
+        setProducts(result.products);
+        setUsingCachedProducts(false);
+        idbSet("products_cache", result);
+      }
     }
     return !!result;
   };
@@ -5658,6 +5678,7 @@ function App() {
     }
   };
   const handleLogout = () => {
+    productsSyncedRef.current = false;
     setCurrentUser(null);
     setAuthError("");
     clearSession();
@@ -5698,25 +5719,62 @@ function App() {
     }
     setSettingsLoaded(true);
   };
-  const ensureProductsLoaded = async () => {
-    if (productsLoaded) return;
-    setProductsLoading(true);
-    const cached = await idbGet("products_cache");
-    const localProducts = cached?.products || [];
-    const localVersions = cached?.versions || {};
-    const result = await syncProducts(localProducts, localVersions);
-    if (result) {
-      setProducts(result.products);
-      setProductsLoaded(true);
-      setUsingCachedProducts(false);
-      idbSet("products_cache", result);
-    } else if (cached) {
-      setProducts(cached.products);
-      setProductsLoaded(true);
-      setUsingCachedProducts(true);
-    }
-    setProductsLoading(false);
+  const productsSyncedRef = React.useRef(false);
+  const productsSyncingRef = React.useRef(false);
+  const productsWantedRef = React.useRef(false);
+  const productVersionsRef = React.useRef({});
+  const ensureProductsLoadedRef = React.useRef(null);
+  const applySyncedProducts = (result) => {
+    productVersionsRef.current = result.versions || {};
+    productsSyncedRef.current = true;
+    setProducts(result.products);
+    setProductsLoaded(true);
+    setUsingCachedProducts(false);
+    idbSet("products_cache", result);
   };
+  const ensureProductsLoaded = async () => {
+    productsWantedRef.current = true;
+    if (productsSyncedRef.current || productsSyncingRef.current) return;
+    productsSyncingRef.current = true;
+    setProductsLoading(true);
+    try {
+      const cached = await idbGet("products_cache");
+      const localProducts = cached?.products || [];
+      const localVersions = cached?.versions || {};
+      productVersionsRef.current = localVersions;
+      if (cached && !productsLoaded) {
+        setProducts(cached.products);
+        setProductsLoaded(true);
+        setUsingCachedProducts(true);
+      }
+      const result = await withTimeout(syncProducts(localProducts, localVersions), PRODUCTS_SYNC_TIMEOUT_MS);
+      if (result) applySyncedProducts(result);
+      else if (cached || productsLoaded) setUsingCachedProducts(true);
+    } finally {
+      productsSyncingRef.current = false;
+      setProductsLoading(false);
+    }
+  };
+  ensureProductsLoadedRef.current = ensureProductsLoaded;
+  useEffect(() => {
+    if (!productsLoaded) return;
+    idbSet("products_cache", { products, versions: productVersionsRef.current });
+  }, [products, productsLoaded]);
+  useEffect(() => {
+    if (!currentUser) return;
+    const retry = () => {
+      if (productsWantedRef.current && !productsSyncedRef.current && ensureProductsLoadedRef.current) ensureProductsLoadedRef.current();
+    };
+    const onReach = (e) => {
+      if (e.detail) retry();
+    };
+    window.addEventListener("network-reachability", onReach);
+    window.addEventListener("online", retry);
+    return () => {
+      window.removeEventListener("network-reachability", onReach);
+      window.removeEventListener("online", retry);
+    };
+  }, [currentUser]);
   const nav = (v) => {
     if (v === "logout") {
       handleLogout();
@@ -5782,10 +5840,11 @@ function App() {
       tierSettings,
       usingCachedProducts,
       setUsingCachedProducts,
+      onProductsSynced: applySyncedProducts,
       branchSettings,
       setView: nav
     }
-  ), screen === "orders" && currentUser && /* @__PURE__ */ React.createElement(OrdersScreen, { user: currentUser, sales, setSales, users, branchSettings, setView: nav }), screen === "transfers" && currentUser && /* @__PURE__ */ React.createElement(TransfersScreen, { user: currentUser, transfers, setTransfers, setView: nav }), screen === "reports" && currentUser && (userIsAdmin(currentUser) || currentUser.permissions?.viewReports) && /* @__PURE__ */ React.createElement(ReportsScreen, { user: currentUser, sales, branchSettings, setView: nav }), screen === "stock-alerts" && currentUser && (userIsAdmin(currentUser) || currentUser.permissions?.manageStockAlerts) && /* @__PURE__ */ React.createElement(StockAlertsScreen, { user: currentUser, stockAlerts, setStockAlerts, setView: nav }), screen === "attendance" && currentUser && /* @__PURE__ */ React.createElement(AttendanceScreen, { user: currentUser, users, attendance, setAttendance, withdrawals, setWithdrawals, branchSettings, setView: nav }), screen === "settings" && currentUser && /* @__PURE__ */ React.createElement(SettingsScreen, { user: currentUser, users, setUsers, tierSettings, setTierSettings, invoiceNumberSettings, setInvoiceNumberSettings, branchSettings, setBranchSettings, setView: nav }), screen === "cashier" && currentUser && /* @__PURE__ */ React.createElement(CashierScreen, { user: currentUser, products, productsLoading, sales, setSales, tierSettings, invoiceNumberSettings, setInvoiceNumberSettings, usingCachedProducts, branchSettings, categories, setView: nav }), screen === "myInvoices" && currentUser && /* @__PURE__ */ React.createElement(MyInvoicesScreen, { user: currentUser, sales, setView: nav }), screen === "returns" && currentUser && /* @__PURE__ */ React.createElement(ReturnsScreen, { user: currentUser, sales, setView: nav }), screen === "admin" && currentUser && (userIsAdmin(currentUser) || currentUser.permissions?.manageUsers) && /* @__PURE__ */ React.createElement(AdminScreen, { user: currentUser, users, setUsers, setView: nav }));
+  ), screen === "orders" && currentUser && /* @__PURE__ */ React.createElement(OrdersScreen, { user: currentUser, sales, setSales, users, branchSettings, setView: nav }), screen === "transfers" && currentUser && /* @__PURE__ */ React.createElement(TransfersScreen, { user: currentUser, transfers, setTransfers, setView: nav }), screen === "reports" && currentUser && (userIsAdmin(currentUser) || currentUser.permissions?.viewReports) && /* @__PURE__ */ React.createElement(ReportsScreen, { user: currentUser, sales, branchSettings, setView: nav }), screen === "stock-alerts" && currentUser && (userIsAdmin(currentUser) || currentUser.permissions?.manageStockAlerts) && /* @__PURE__ */ React.createElement(StockAlertsScreen, { user: currentUser, stockAlerts, setStockAlerts, setView: nav }), screen === "attendance" && currentUser && /* @__PURE__ */ React.createElement(AttendanceScreen, { user: currentUser, users, attendance, setAttendance, withdrawals, setWithdrawals, branchSettings, setView: nav }), screen === "settings" && currentUser && /* @__PURE__ */ React.createElement(SettingsScreen, { user: currentUser, users, setUsers, tierSettings, setTierSettings, invoiceNumberSettings, setInvoiceNumberSettings, branchSettings, setBranchSettings, setView: nav }), screen === "cashier" && currentUser && /* @__PURE__ */ React.createElement(CashierScreen, { user: currentUser, products, productsLoading, productsLoaded, sales, setSales, tierSettings, invoiceNumberSettings, setInvoiceNumberSettings, usingCachedProducts, branchSettings, categories, setView: nav }), screen === "myInvoices" && currentUser && /* @__PURE__ */ React.createElement(MyInvoicesScreen, { user: currentUser, sales, setView: nav }), screen === "returns" && currentUser && /* @__PURE__ */ React.createElement(ReturnsScreen, { user: currentUser, sales, setView: nav }), screen === "admin" && currentUser && (userIsAdmin(currentUser) || currentUser.permissions?.manageUsers) && /* @__PURE__ */ React.createElement(AdminScreen, { user: currentUser, users, setUsers, setView: nav }));
 }
 const MY_INVOICES_PAGE_SIZE = 6;
 function invoiceDayLabel(ts) {
@@ -7409,6 +7468,7 @@ const SYS_PART4_CHECKS = [
       c.skip("P4-M1h", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0628\u0634\u0643\u0644 \u062D\u0642\u064A\u0642\u064A (fix #63)", "\u270B \u064A\u062F\u0648\u064A: \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646 \u0648\u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0648\u0633\u064A\u0628\u0647 \u062F\u0642\u064A\u0642\u062A\u064A\u0646: \u0645\u0627 \u064A\u0638\u0647\u0631\u0634 \u0634\u0631\u064A\u0637 \xAB\u062A\u0639\u0630\u0631 \u0627\u0644\u0627\u062A\u0635\u0627\u0644 \u0628\u0642\u0627\u0639\u062F\u0629 \u0627\u0644\u0628\u064A\u0627\u0646\u0627\u062A\xBB. \u0628\u0639\u062F\u0647\u0627 \u0634\u063A\u0651\u0644 \u0627\u0644\u0646\u062A: \u0623\u064A \u062E\u0637\u0623 \u062D\u0642\u064A\u0642\u064A \u0644\u0633\u0647 \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 (\u0645\u062B\u0644\u064B\u0627 \u0645\u0645\u0646\u0648\u0639 \u0645\u0646 \u0627\u0644\u0635\u0644\u0627\u062D\u064A\u0627\u062A)");
       c.skip("P4-M1i", "\u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0645\u0648\u062D\u0651\u062F \u0648\u0642\u062A \u0627\u0644\u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0628\u0634\u0643\u0644 \u062D\u0642\u064A\u0642\u064A (fix #66)", "\u270B \u064A\u062F\u0648\u064A: \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646 \u0648\u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631: \u0644\u0627\u0632\u0645 \u064A\u0638\u0647\u0631 \u0634\u0631\u064A\u0637 \u0648\u0627\u062D\u062F \u0628\u0633 (\u0645\u0634 \u0627\u062A\u0646\u064A\u0646) \u062A\u062D\u062A \u0627\u0644\u0634\u0631\u064A\u0637 \u0627\u0644\u0623\u062D\u0645\u0631 \u0628\u062A\u0627\u0639 \u0627\u0644\u0640Beta \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u064A\u063A\u0637\u064A \u0627\u0644\u0647\u064A\u062F\u0631\u060C \u0641\u064A\u0647 \xAB\u0623\u0648\u0641\u0644\u0627\u064A\u0646\xBB \u0648\u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0622\u062E\u0631 \u0646\u0633\u062E\u0629\u060C \u0648\u0644\u0645\u0627 \u062A\u0646\u0632\u0644 \u0628\u0627\u0644\u0635\u0641\u062D\u0629 \u064A\u0645\u0634\u064A \u0645\u0639\u0627\u0647\u0627. \u0628\u064A\u0639 \u0641\u0627\u062A\u0648\u0631\u0629: \u064A\u0632\u064A\u062F \xAB\u0661 \u062A\u0639\u062F\u064A\u0644 \u0641\u064A \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631\xBB. \u0634\u063A\u0651\u0644 \u0627\u0644\u0646\u062A: \xAB\u062C\u0627\u0631\u064A \u0645\u0632\u0627\u0645\u0646\u0629\u2026\xBB \u0648\u0628\u0639\u062F\u0647\u0627 \u064A\u062E\u062A\u0641\u064A");
       c.skip("P4-M1j", "\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0648\u0641\u0644\u0627\u064A\u0646 + \u0642\u0637\u0639 \u0627\u0644\u0646\u062A \u0648\u0627\u0646\u062A \u062C\u0648\u0647 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 (fix #67)", "\u270B \u064A\u062F\u0648\u064A: (\u0661) \u0627\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0628\u0646\u062A \u0645\u0631\u062A\u064A\u0646 (\u0639\u0634\u0627\u0646 \u064A\u062E\u0632\u0651\u0646 \u0646\u0641\u0633\u0647)\u060C \u0627\u0642\u0641\u0644\u0647 \u062A\u0645\u0627\u0645\u064B\u0627\u060C \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646\u060C \u0627\u0641\u062A\u062D\u0647: \u0644\u0627\u0632\u0645 \u064A\u0641\u062A\u062D \u0648\u064A\u062F\u062E\u0644. (\u0662) \u0648\u0627\u0646\u062A \u062C\u0648\u0647 \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0634\u063A\u0651\u0644 \u0627\u0644\u0648\u0627\u064A \u0641\u0627\u064A \u0628\u0633 \u0645\u0646 \u063A\u064A\u0631 \u0646\u062A (\u0623\u0648 \u0627\u0641\u0635\u0644 \u0627\u0644\u0646\u062A \u0645\u0646 \u0627\u0644\u0631\u0627\u0648\u062A\u0631): \u0641\u064A \u0623\u0642\u0644 \u0645\u0646 \u0646\u0635 \u062F\u0642\u064A\u0642\u0629 \u064A\u0638\u0647\u0631 \u0634\u0631\u064A\u0637 \xAB\u0623\u0648\u0641\u0644\u0627\u064A\u0646\xBB. \u0631\u062C\u0651\u0639 \u0627\u0644\u0646\u062A: \xAB\u062C\u0627\u0631\u064A \u0645\u0632\u0627\u0645\u0646\u0629\xBB \u0644\u0648 \u0641\u064A\u0647 \u062D\u0627\u062C\u0629 \u0645\u0633\u062A\u0646\u064A\u0629\u060C \u0648\u0628\u0639\u062F\u0647\u0627 \u064A\u062E\u062A\u0641\u064A");
+      c.skip("P4-M1k", "\u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A \u0623\u0648\u0641\u0644\u0627\u064A\u0646 (fix #68)", "\u270B \u064A\u062F\u0648\u064A: (\u0661) \u0628\u0646\u062A: \u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631\u060C \u062B\u0645 \u0645\u0646 \u0627\u0644\u0623\u0633\u0639\u0627\u0631 \u0636\u064A\u0641 \u0645\u0646\u062A\u062C \u062C\u062F\u064A\u062F \u0648\u0639\u062F\u0651\u0644 \u0633\u0639\u0631 \u0645\u0646\u062A\u062C. \u0627\u0642\u0641\u0644 \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u062A\u0645\u0627\u0645\u064B\u0627\u060C \u0634\u063A\u0651\u0644 \u0648\u0636\u0639 \u0627\u0644\u0637\u064A\u0631\u0627\u0646\u060C \u0627\u0641\u062A\u062D \u0627\u0644\u0643\u0627\u0634\u064A\u0631: \u0644\u0627\u0632\u0645 \u0627\u0644\u0645\u0646\u062A\u062C \u0627\u0644\u062C\u062F\u064A\u062F \u0648\u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u062C\u062F\u064A\u062F \u064A\u0638\u0647\u0631\u0648\u0627 \u0641\u0648\u0631\u064B\u0627. (\u0662) \u0648\u0627\u0646\u062A \u0623\u0648\u0641\u0644\u0627\u064A\u0646 \u0648\u0641\u064A \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u0636\u064A\u0641 \u0645\u0646\u062A\u062C \u0645\u0646 \u062C\u0647\u0627\u0632 \u062A\u0627\u0646\u064A\u060C \u062B\u0645 \u0631\u062C\u0651\u0639 \u0627\u0644\u0646\u062A: \u0641\u064A \u0623\u0642\u0644 \u0645\u0646 \u0646\u0635 \u062F\u0642\u064A\u0642\u0629 \u0627\u0644\u0645\u0646\u062A\u062C \u064A\u0638\u0647\u0631 \u0645\u0646 \u063A\u064A\u0631 \u0645\u0627 \u062A\u0642\u0641\u0644 \u0627\u0644\u062A\u0637\u0628\u064A\u0642. (\u0663) \u062C\u0647\u0627\u0632 \u062C\u062F\u064A\u062F/\u0628\u0639\u062F \u0645\u0633\u062D \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0648\u0642\u0639 \u0648\u0623\u0648\u0641\u0644\u0627\u064A\u0646: \u0627\u0644\u0643\u0627\u0634\u064A\u0631 \u064A\u0642\u0648\u0644 \xAB\u0627\u0644\u0645\u0646\u062A\u062C\u0627\u062A \u0644\u0633\u0647 \u0645\u0627\u062A\u062D\u0645\u0651\u0644\u062A\u0634\xBB \u0628\u062F\u0644 \u0642\u0627\u064A\u0645\u0629 \u0641\u0627\u0636\u064A\u0629 \u0645\u0646 \u063A\u064A\u0631 \u062A\u0641\u0633\u064A\u0631");
       c.skip("P4-M1f", "\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642 \u0623\u0648\u0644 \u0645\u0631\u0629 \u0645\u0646 \u063A\u064A\u0631 \u0625\u0646\u062A\u0631\u0646\u062A", "\u270B \u064A\u062F\u0648\u064A: \u0627\u0645\u0633\u062D \u0628\u064A\u0627\u0646\u0627\u062A \u0627\u0644\u0645\u0648\u0642\u0639\u060C \u0648\u0642\u0641 \u0627\u0644\u0646\u062A\u060C \u0627\u0641\u062A\u062D \u0627\u0644\u062A\u0637\u0628\u064A\u0642: \u0647\u0644 \u0628\u064A\u0641\u062A\u062D\u061F (\u0627\u0644\u0640 CDN \u0645\u0634 \u0628\u064A\u062A\u062E\u0632\u0646 \u0641\u064A \u0627\u0644\u0640 service worker)");
     }
   }
